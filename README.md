@@ -1,10 +1,10 @@
 # 네이버 클라우드 플랫폼 서버 관리 Kubernetes Operator
 
-네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes에서 관리할 수 있는 Custom Operator입니다.
+네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes에서 관리할 수 있는 Custom Operator
 
 ## 📋 개요
 
-이 프로젝트는 Go Operator SDK를 사용하여 네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes Custom Resource로 관리할 수 있도록 구현합니다.
+이 프로젝트는 Go Operator SDK를 사용하여 네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes Custom Resource로 관리할 수 있도록 구현한다.
 
 ## 🛠️ 개발 환경 설정
 
@@ -322,7 +322,8 @@ kubectl logs -f -l control-plane=controller-manager -n ncloud-server-system
 # Custom Resource 이벤트 확인
 kubectl describe ncloudserver web-server-01
 
-# 네이버 클라우드 API 호출 테스트 (실제 CLI 사용)
+# 네이버 클라우드 API 호출 테스트 (로컬 CLI 사용)
+# ※ 주의: ncloud_cli_linux/ 폴더는 .gitignore에 포함되어 GitHub에 업로드되지 않음
 ./ncloud_cli_linux/ncloud vserver getRegionList
 ```
 

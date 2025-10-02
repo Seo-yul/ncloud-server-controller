@@ -25,3 +25,6 @@ go.work
 *.swp
 *.swo
 *~
+
+# 네이버 클라우드 CLI (로컬 설치 파일)
+ncloud_cli_linux/
