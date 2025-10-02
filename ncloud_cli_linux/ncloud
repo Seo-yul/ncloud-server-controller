@@ -1,0 +1,2 @@
+#!/bin/bash
+./jre8/bin/java -jar ./lib/ncloud-api-cli-1.1.26-SNAPSHOT-jar-with-dependencies.jar "$@"

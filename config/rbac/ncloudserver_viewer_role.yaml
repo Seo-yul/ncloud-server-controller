@@ -1,0 +1,29 @@
+# This rule is not used by the project ncloud-server-controller itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to server.ncloud.devops.ai.kr resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: ncloud-server-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: ncloudserver-viewer-role
+rules:
+- apiGroups:
+  - server.ncloud.devops.ai.kr
+  resources:
+  - ncloudservers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - server.ncloud.devops.ai.kr
+  resources:
+  - ncloudservers/status
+  verbs:
+  - get

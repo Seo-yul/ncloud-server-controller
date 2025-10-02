@@ -1,0 +1,9 @@
+apiVersion: server.ncloud.devops.ai.kr/v1
+kind: NCloudServer
+metadata:
+  labels:
+    app.kubernetes.io/name: ncloud-server-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: ncloudserver-sample
+spec:
+  # TODO(user): Add fields here
