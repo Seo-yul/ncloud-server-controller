@@ -191,6 +191,39 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx rm ncloud-server-controller-builder
 	rm Dockerfile.cross
 
+# PODMAN_MULTI_PLATFORMS defines the target platforms for podman multi-arch builds
+PODMAN_MULTI_PLATFORMS ?= linux/amd64,linux/arm64
+
+.PHONY: podman-multiarch-build
+podman-multiarch-build: ## Build and push docker image for the manager for cross-platform support using podman
+	@echo "Building multi-architecture image with podman: ${IMG}"
+	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
+	# Create manifest list
+	podman manifest create ${IMG}
+	# Build and push for each architecture
+	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
+	@for arch in $(ARCHS); do \
+		echo "Building for platform: $$arch"; \
+		podman build --platform $$arch --tag ${IMG}-$${arch##*/} . && \
+		echo "Pushing $$arch image" && \
+		podman push ${IMG}-$${arch##*/} && \
+		echo "Adding $$arch to manifest" && \
+		podman manifest add ${IMG} docker://${IMG}-$${arch##*/}; \
+	done
+	# Push manifest list
+	@echo "Pushing multi-architecture manifest"
+	podman manifest push ${IMG} docker://${IMG}
+	@echo "Multi-architecture build complete: ${IMG}"
+
+.PHONY: podman-cleanup
+podman-cleanup: ## Clean up temporary podman images and manifests
+	@echo "Cleaning up podman multi-arch artifacts..."
+	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
+	@for arch in $(ARCHS); do \
+		podman rmi ${IMG}-$${arch##*/} 2>/dev/null || true; \
+	done
+	podman manifest rm ${IMG} 2>/dev/null || true
+
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist

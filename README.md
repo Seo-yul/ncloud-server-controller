@@ -2,11 +2,11 @@
 
 네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes에서 관리할 수 있는 Custom Operator
 
-## 📋 개요
+## 개요
 
 이 프로젝트는 Go Operator SDK를 사용하여 네이버 클라우드 플랫폼의 서버 인스턴스를 Kubernetes Custom Resource로 관리할 수 있도록 구현한다.
 
-## 🛠️ 개발 환경 설정
+## 개발 환경 설정
 
 ### 1. 필수 도구 설치
 
@@ -94,7 +94,7 @@ ncloud-server-controller/
 └── go.mod
 ```
 
-## 🔧 개발 단계별 명령어
+## 개발 단계별 명령어
 
 ### 단계 1: Custom Resource 정의 수정
 
@@ -156,8 +156,9 @@ kubectl logs -f deployment/ncloudserver-controller-manager -n ncloud-server-syst
 
 ### 단계 6: 클러스터 배포
 
+**Docker 사용시:**
 ```bash
-# Docker 이미지 빌드 (멀티 아키텍처 지원)
+# Docker 멀티 아키텍처 빌드
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --tag your-registry/ncloudserver:v0.0.1 \
@@ -165,7 +166,47 @@ docker buildx build \
 
 # 또는 단일 아키텍처
 make docker-build docker-push IMG=your-registry/ncloudserver:v0.0.1
+```
 
+**Podman 사용시 (Makefile 통합 - 권장):**
+```bash
+# 간편한 멀티 아키텍처 빌드 (Makefile 타겟 사용)
+make podman-multiarch-build IMG=your-registry/ncloudserver:v0.0.1
+
+# 빌드 후 정리 (선택사항)
+make podman-cleanup IMG=your-registry/ncloudserver:v0.0.1
+
+**또는 수동 단계별 빌드:**
+# 1. 먼저 manifest 생성
+podman manifest create your-registry/ncloudserver:v0.0.1
+
+# 2. 각 아키텍처별로 개별 빌드 및 푸시
+# AMD64
+podman build \
+  --platform linux/amd64 \
+  --tag your-registry/ncloudserver:v0.0.1-amd64 \
+  .
+
+# ARM64  
+podman build \
+  --platform linux/arm64 \
+  --tag your-registry/ncloudserver:v0.0.1-arm64 \
+  .
+
+# 3. 개별 이미지 푸시
+podman push your-registry/ncloudserver:v0.0.1-amd64
+podman push your-registry/ncloudserver:v0.0.1-arm64
+
+# 4. manifest에 이미지 추가
+podman manifest add your-registry/ncloudserver:v0.0.1 docker://your-registry/ncloudserver:v0.0.1-amd64
+podman manifest add your-registry/ncloudserver:v0.0.1 docker://your-registry/ncloudserver:v0.0.1-arm64
+
+# 5. 멀티 아키텍처 manifest 푸시
+podman manifest push your-registry/ncloudserver:v0.0.1 docker://your-registry/ncloudserver:v0.0.1
+```
+
+**배포:**
+```bash
 # 매니페스트 생성 및 배포
 make deploy IMG=your-registry/ncloudserver:v0.0.1
 ```
@@ -196,7 +237,7 @@ kubectl create secret generic ncloud-credentials \
   -n ncloud-server-system
 ```
 
-## 📊 API 명령어 참고
+## API 명령어 참고
 
 ### 서버 생성
 ```bash
@@ -227,7 +268,7 @@ ncloud vserver getServerInstanceDetail \
   --serverInstanceNo "server-instance-no"
 ```
 
-## 🧪 테스트 명령어
+## 테스트 명령어
 
 ```bash
 # 전체 테스트 실행 (현재 환경)
@@ -252,7 +293,7 @@ for arch in amd64 arm64 ; do
 done
 ```
 
-## 🚀 배포 및 운영
+## 배포 및 운영
 
 ### Minikube 로컬 테스트
 
@@ -277,7 +318,7 @@ make bundle
 make bundle-push
 ```
 
-## 📁 실제 생성된 Custom Resource 예시
+## 실제 생성된 Custom Resource 예시
 
 **현재 생성된 Sample 파일** (`config/samples/server_v1_ncloudserver.yaml`):
 ```yaml
@@ -313,7 +354,7 @@ status:
   message: "Server instances are being created"
 ```
 
-## 🔍 디버깅 및 트러블슈팅
+## 디버깅 및 트러블슈팅
 
 ```bash
 # Operator 로그 실시간 확인
@@ -327,19 +368,19 @@ kubectl describe ncloudserver web-server-01
 ./ncloud_cli_linux/ncloud vserver getRegionList
 ```
 
-## 📚 참고 자료
+## 참고 자료
 
 - [Kubernetes Operator SDK 문서](https://sdk.operatorframework.io/)
 - [네이버 클라우드 플랫폼 CLI 가이드](https://cli.ncloud-docs.com/docs/guide)
 - [Go Operator 튜토리얼](https://sdk.operatorframework.io/docs/building-operators/golang/tutorial/)
 
-## 📝 개발 로드맵
+## 개발 로드맵
 
-- [x] ✅ **개발 환경 설정 완료** (Go 1.23.1 darwin/arm64)
-- [x] ✅ **Operator SDK 프로젝트 초기화 완료**
-- [x] ✅ **기본 CRD 정의 완료** (`server.ncloud.devops.ai.kr/v1`)
-- [x] ✅ **API 및 Controller 스켈레톤 생성** (`NCloudServer` Kind)
-- [x] ✅ **CRD 매니페스트 생성 완료**
+- [x] **개발 환경 설정 완료** (Go 1.23.1 darwin/arm64)
+- [x] **Operator SDK 프로젝트 초기화 완료**
+- [x] **기본 CRD 정의 완료** (`server.ncloud.devops.ai.kr/v1`)
+- [x] **API 및 Controller 스켈레톤 생성** (`NCloudServer` Kind)
+- [x] **CRD 매니페스트 생성 완료**
 - [ ] 네이버 클라우드 CLI 연동
 - [ ] 서버 생성/삭제 로직 구현
 - [ ] 상태 동기화 구현
