@@ -67,6 +67,9 @@ jobs:
           ${{ startsWith(steps.version.outputs.version, 'v') && format('{0}:latest', env.IMAGE_NAME) || '' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          TARGETOS=linux
+          TARGETARCH=${{ matrix.arch }}
 
     - name: Generate changelog
       id: changelog
