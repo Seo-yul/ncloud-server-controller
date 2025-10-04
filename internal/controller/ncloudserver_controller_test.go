@@ -81,8 +81,12 @@ var _ = Describe("NCloudServer Controller", func() {
 			controllerReconciler.NCloudCliPath = mockCliPath
 
 			// 테스트용 환경변수 설정
-			os.Setenv("NCLOUD_CLI_PATH", mockCliPath)
-			defer os.Unsetenv("NCLOUD_CLI_PATH")
+			err = os.Setenv("NCLOUD_CLI_PATH", mockCliPath)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				err := os.Unsetenv("NCLOUD_CLI_PATH")
+				Expect(err).NotTo(HaveOccurred())
+			}()
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,

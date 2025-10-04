@@ -51,6 +51,19 @@ const (
 	envNCloudCliPath = "NCLOUD_CLI_PATH"
 	// 기본 CLI 경로
 	defaultCliPath = "/opt/ncloud-cli/ncloud_cli_linux/ncloud"
+	
+	// 서버 상태 상수
+	serverPhaseCreating    = "Creating"
+	serverPhaseRunning     = "Running"
+	serverPhaseFailed      = "Failed"
+	serverPhaseTerminating = "Terminating"
+	
+	// 서버 상태 메시지 상수
+	serverStatusRunning = "Server is running"
+	serverStatusInit    = "INIT"
+	
+	// 임시 인스턴스 번호
+	tempInstanceNo = "TEMPORARY_INSTANCE_NO"
 )
 
 // +kubebuilder:rbac:groups=server.ncloud.devops.ai.kr,resources=ncloudservers,verbs=get;list;watch;create;update;patch;delete
@@ -83,7 +96,7 @@ func (r *NCloudServerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log.Info("Reconciling NCloudServer", "name", req.Name, "namespace", req.Namespace)
 
 	// 삭제 요청 감지 및 Finalizer 처리
-	if !ncloudServer.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !ncloudServer.DeletionTimestamp.IsZero() {
 		// 리소스가 삭제 요청됨 - cleanup 수행
 		log.Info("Deletion requested for NCloudServer", "name", req.Name)
 		return r.handleResourceDeletion(ctx, &ncloudServer, log)
@@ -103,16 +116,16 @@ func (r *NCloudServerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	case "":
 		// 새로 생성된 리소스 - CREATE 단계
 		return r.handleServerCreate(ctx, &ncloudServer, log)
-	case "Creating":
+	case serverPhaseCreating:
 		// 생성 중 - 상태 확인
 		return r.handleServerCreating(ctx, &ncloudServer, log)
-	case "Running":
+	case serverPhaseRunning:
 		// 운영 중 - 상태 동기화 확인
 		return r.handleServerRunning(ctx, &ncloudServer, log)
-	case "Failed":
+	case serverPhaseFailed:
 		// 실패 상태 - 재시도 또는 에러 처리
 		return r.handleServerFailed(ctx, &ncloudServer, log)
-	case "Terminating":
+	case serverPhaseTerminating:
 		// 삭제 중 - 서버 삭제 처리
 		return r.handleServerTerminating(ctx, &ncloudServer, log)
 	default:
@@ -122,7 +135,7 @@ func (r *NCloudServerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NCloudServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	//cloudCliPath 설정
+	// cloudCliPath 설정
 	if cliPath := os.Getenv(envNCloudCliPath); cliPath != "" {
 		r.NCloudCliPath = cliPath
 	} else {
@@ -176,17 +189,17 @@ func (r *NCloudServerReconciler) handleServerCreating(ctx context.Context, serve
 
 	// 상태에 따라 처리
 	switch status {
-	case "INIT":
+	case serverStatusInit:
 		log.Info("Server is initializing")
 		server.Status.Message = "Server initializing"
 	case "CREATDT":
 		log.Info("Server creation completed")
 		server.Status.Phase = "Running"
-		server.Status.Message = "Server is running"
+		server.Status.Message = serverStatusRunning
 	case "RUN":
 		log.Info("Server is running")
 		server.Status.Phase = "Running"
-		server.Status.Message = "Server is running"
+		server.Status.Message = serverStatusRunning
 	case "STOPDT":
 		log.Info("Server stopped")
 		server.Status.Message = "Server stopped"
@@ -221,7 +234,7 @@ func (r *NCloudServerReconciler) handleServerRunning(ctx context.Context, server
 		}
 		server.Status.PublicIp = serverInfo.PublicIp
 		server.Status.PrivateIp = serverInfo.PrivateIp
-		server.Status.Message = "Server is running"
+		server.Status.Message = serverStatusRunning
 	}
 
 	server.Status.LastReconcileTime = metav1.Now().Format(time.RFC3339)
@@ -232,7 +245,7 @@ func (r *NCloudServerReconciler) handleServerRunning(ctx context.Context, server
 }
 
 // handleServerFailed 실패 상태 처리
-func (r *NCloudServerReconciler) handleServerFailed(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) (ctrl.Result, error) {
+func (r *NCloudServerReconciler) handleServerFailed(_ context.Context, server *serverv1.NCloudServer, log logr.Logger) (ctrl.Result, error) {
 	log.Info("Server creation failed, manual intervention required", "name", server.Name)
 	return ctrl.Result{RequeueAfter: time.Minute * 10}, nil
 }
@@ -257,7 +270,7 @@ func (r *NCloudServerReconciler) handleResourceDeletion(ctx context.Context, ser
 	log.Info("Handling resource deletion", "name", server.Name, "serverInstanceNo", server.Status.ServerInstanceNo)
 
 	// 실제 서버가 생성되어 있다면 삭제
-	if server.Status.ServerInstanceNo != "" && server.Status.ServerInstanceNo != "TEMPORARY_INSTANCE_NO" {
+	if server.Status.ServerInstanceNo != "" && server.Status.ServerInstanceNo != tempInstanceNo {
 		log.Info("Deleting NCloud server", "serverInstanceNo", server.Status.ServerInstanceNo)
 
 		if err := r.deleteServer(ctx, server.Status.ServerInstanceNo, log); err != nil {
@@ -291,58 +304,7 @@ func (r *NCloudServerReconciler) updateStatus(ctx context.Context, server *serve
 	return nil
 }
 
-// updateStatusWithRetry 재시도가 포함된 Status 업데이트
-func (r *NCloudServerReconciler) updateStatusWithRetry(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger, maxRetries int) error {
-	for i := 0; i < maxRetries; i++ {
-		if err := r.Status().Update(ctx, server); err != nil {
-			if i == maxRetries-1 {
-				log.Error(err, "failed to update status after all retries")
-				return err
-			}
-			log.V(1).Info("status update failed, retrying", "attempt", i+1, "error", err)
-			time.Sleep(time.Millisecond * 100) // 짧은 대기
-			continue
-		}
-		return nil
-	}
-	return nil
-}
 
-// createOrUpdateConfigMap Controller Utils의 CreateOrUpdate 패턴 사용 예시
-func (r *NCloudServerReconciler) createOrUpdateConfigMap(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) error {
-	configMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-config", server.Name),
-			Namespace: server.Namespace,
-		},
-	}
-
-	// Controller Utils의 CreateOrUpdate 패턴 사용
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
-		// Owner Reference 설정 (자동 가비지 컬렉션)
-		if err := controllerutil.SetControllerReference(server, configMap, r.Scheme); err != nil {
-			return err
-		}
-
-		// ConfigMap 데이터 설정
-		if configMap.Data == nil {
-			configMap.Data = make(map[string]string)
-		}
-		configMap.Data["server-name"] = server.Name
-		configMap.Data["vpc-no"] = server.Spec.VpcNo
-		configMap.Data["subnet-no"] = server.Spec.SubnetNo
-
-		return nil
-	})
-
-	if err != nil {
-		log.Error(err, "failed to create or update configmap")
-		return err
-	}
-
-	log.Info("configmap reconciled", "result", result)
-	return nil
-}
 
 // ServerInfo CLI에서 반환되는 서버 정보 구조체
 type ServerInfo struct {
