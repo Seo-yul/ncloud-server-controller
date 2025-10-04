@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# NCloud CLI 다운로드 및 설정
+# NCloud CLI 다운로드 및 설정 (올바른 URL 사용)
 RUN mkdir -p /opt/ncloud-cli && \
     cd /opt/ncloud-cli && \
     wget -O ncloud-cli.zip "https://github.com/NaverCloudPlatform/ncloud-cli/releases/download/v1.1.26/ncloud-cli-linux.zip" && \
