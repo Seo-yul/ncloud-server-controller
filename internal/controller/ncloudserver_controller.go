@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -51,17 +50,17 @@ const (
 	envNCloudCliPath = "NCLOUD_CLI_PATH"
 	// 기본 CLI 경로
 	defaultCliPath = "/opt/ncloud-cli/ncloud_cli_linux/ncloud"
-	
+
 	// 서버 상태 상수
 	serverPhaseCreating    = "Creating"
 	serverPhaseRunning     = "Running"
 	serverPhaseFailed      = "Failed"
 	serverPhaseTerminating = "Terminating"
-	
+
 	// 서버 상태 메시지 상수
 	serverStatusRunning = "Server is running"
 	serverStatusInit    = "INIT"
-	
+
 	// 임시 인스턴스 번호
 	tempInstanceNo = "TEMPORARY_INSTANCE_NO"
 )
@@ -303,8 +302,6 @@ func (r *NCloudServerReconciler) updateStatus(ctx context.Context, server *serve
 	}
 	return nil
 }
-
-
 
 // ServerInfo CLI에서 반환되는 서버 정보 구조체
 type ServerInfo struct {
