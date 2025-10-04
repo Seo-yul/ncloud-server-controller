@@ -1,0 +1,164 @@
+name: Release and Deploy to GHCR
+
+on:
+  push:
+    tags:
+      - 'v*'  # v1.0.0, v1.2.3 등 태그 푸시 시 실행
+  workflow_dispatch:  # 수동 실행 가능
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/seo-yul/ncloud-server-controller
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 전체 히스토리 가져오기 (태그 정보용)
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: Set up Podman
+      uses: containers/podman-setup-action@v0.1.0
+
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+        else
+          VERSION="latest"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+        fi
+        echo "Extracted version: ${VERSION}"
+
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.NCLOUD_SERVER_CONTROLLER_REPO }}
+
+    - name: Build multi-arch image
+      run: |
+        # AMD64 이미지 빌드
+        podman build --platform linux/amd64 -t ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 .
+        
+        # ARM64 이미지 빌드
+        podman build --platform linux/arm64 -t ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64 .
+
+    - name: Create manifest and push
+      run: |
+        # 매니페스트 생성
+        podman manifest create ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+          ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
+          ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
+        
+        # 매니페스트 푸시
+        podman manifest push ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+          docker://${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+
+        # Latest 태그도 푸시 (v* 태그인 경우)
+        if [[ ${{ steps.version.outputs.version }} == v* ]]; then
+          podman manifest create ${{ env.IMAGE_NAME }}:latest \
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
+          
+          podman manifest push ${{ env.IMAGE_NAME }}:latest \
+            docker://${{ env.IMAGE_NAME }}:latest
+        fi
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # 이전 태그 찾기
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "changelog=Initial release" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        release_name: Release ${{ steps.version.outputs.tag }}
+        body: |
+          ## 🚀 NCloud Server Controller ${{ steps.version.outputs.tag }}
+          
+          ### 📦 Container Image
+          ```bash
+          # Pull the image
+          podman pull ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          
+          # Or use latest
+          podman pull ${{ env.IMAGE_NAME }}:latest
+          ```
+          
+          ### 🐳 Kubernetes Deployment
+          ```bash
+          kubectl set image deployment/ncloud-server-controller-manager \
+            manager=${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+            -n ncloud-system
+          ```
+          
+          ### 📋 Changes
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ### 🔗 Package Registry
+          [View on GHCR](https://github.com/seo-yul/packages)
+        draft: false
+        prerelease: false
+
+    - name: Update Kubernetes manifests
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        # 기본 매니페스트의 이미지 태그 업데이트
+        sed -i "s|image: .*|image: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}|g" \
+          config/default/manager/manager.yaml
+        
+        # 변경사항 커밋 (선택사항)
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add config/default/manager/manager.yaml
+        git commit -m "Update image tag to ${{ steps.version.outputs.version }}" || true
+        git push || true
+
+    - name: Summary
+      run: |
+        echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Registry**: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Architectures**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "1. Check the [GitHub Release](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+        echo "2. Verify the [GHCR Package](https://github.com/seo-yul/packages)" >> $GITHUB_STEP_SUMMARY
+        echo "3. Update your Kubernetes deployment:" >> $GITHUB_STEP_SUMMARY
+        echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "   kubectl set image deployment/ncloud-server-controller-manager \\" >> $GITHUB_STEP_SUMMARY
+        echo "     manager=${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \\" >> $GITHUB_STEP_SUMMARY
+        echo "     -n ncloud-system" >> $GITHUB_STEP_SUMMARY
+        echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY

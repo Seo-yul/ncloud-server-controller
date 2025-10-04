@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -73,12 +75,25 @@ var _ = Describe("NCloudServer Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			// Mock CLI 경로 설정
+			mockCliPath, err := filepath.Abs("../../test/mock_ncloud_cli.sh")
+			Expect(err).NotTo(HaveOccurred())
+			controllerReconciler.NCloudCliPath = mockCliPath
+
+			// 테스트용 환경변수 설정
+			os.Setenv("NCLOUD_CLI_PATH", mockCliPath)
+			defer os.Unsetenv("NCLOUD_CLI_PATH")
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			// 리소스 상태 확인
+			updatedResource := &serverv1.NCloudServer{}
+			err = k8sClient.Get(ctx, typeNamespacedName, updatedResource)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedResource.Status.Phase).To(Equal("Creating"))
 		})
 	})
 })

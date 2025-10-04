@@ -61,8 +61,13 @@ RUN chmod +x /opt/ncloud-cli/ncloud_cli_linux/ncloud
 # 작업 디렉토리 설정
 WORKDIR /opt/ncloud-cli/ncloud_cli_linux
 
-# 비-root 사용자 설정
-RUN groupadd -r manager && useradd --no-log-init -r -g manager manager
-USER manager
+# 비-root 사용자 설정 (Kubernetes 보안 정책 호환)
+RUN groupadd -r manager -g 1000 && useradd --no-log-init -r -g manager -u 1000 manager
+USER 1000:1000
+
+# GitHub Packages 라벨 추가 (리포지토리 연결 및 메타데이터)
+LABEL org.opencontainers.image.source=https://github.com/Seo-yul/ncloud-server-controller
+LABEL org.opencontainers.image.description="NCloud Server Controller - Kubernetes Operator for managing NCloud VPC servers"
+LABEL org.opencontainers.image.licenses=MIT
 
 ENTRYPOINT ["/manager"]

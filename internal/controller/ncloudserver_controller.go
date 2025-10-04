@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,6 +56,9 @@ const (
 // +kubebuilder:rbac:groups=server.ncloud.devops.ai.kr,resources=ncloudservers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=server.ncloud.devops.ai.kr,resources=ncloudservers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=server.ncloud.devops.ai.kr,resources=ncloudservers/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 const (
 	finalizerName = "ncloudserver.server.ncloud.devops.ai.kr"
@@ -140,8 +144,7 @@ func (r *NCloudServerReconciler) handleServerCreate(ctx context.Context, server 
 	server.Status.Message = "Server creation initiated"
 	server.Status.LastReconcileTime = metav1.Now().Format(time.RFC3339)
 
-	if err := r.Status().Update(ctx, server); err != nil {
-		log.Error(err, "failed to update status")
+	if err := r.updateStatus(ctx, server, log); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -150,7 +153,10 @@ func (r *NCloudServerReconciler) handleServerCreate(ctx context.Context, server 
 		log.Error(err, "failed to create server")
 		server.Status.Phase = "Failed"
 		server.Status.Message = fmt.Sprintf("Failed to create server: %v", err)
-		r.Status().Update(ctx, server)
+		if updateErr := r.Status().Update(ctx, server); updateErr != nil {
+			log.Error(updateErr, "failed to update status after server creation failure")
+			return ctrl.Result{}, updateErr
+		}
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, err
 	}
 
@@ -190,7 +196,10 @@ func (r *NCloudServerReconciler) handleServerCreating(ctx context.Context, serve
 	}
 
 	server.Status.LastReconcileTime = metav1.Now().Format(time.RFC3339)
-	return ctrl.Result{}, r.Status().Update(ctx, server)
+	if err := r.updateStatus(ctx, server, log); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 // handleServerRunning 운영 중 상태 처리
@@ -216,7 +225,10 @@ func (r *NCloudServerReconciler) handleServerRunning(ctx context.Context, server
 	}
 
 	server.Status.LastReconcileTime = metav1.Now().Format(time.RFC3339)
-	return ctrl.Result{}, r.Status().Update(ctx, server)
+	if err := r.updateStatus(ctx, server, log); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 // handleServerFailed 실패 상태 처리
@@ -268,6 +280,68 @@ func (r *NCloudServerReconciler) handleResourceDeletion(ctx context.Context, ser
 
 	log.Info("Resource deletion completed", "name", server.Name)
 	return ctrl.Result{}, nil
+}
+
+// updateStatus 안전한 Status 업데이트 헬퍼 함수
+func (r *NCloudServerReconciler) updateStatus(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) error {
+	if err := r.Status().Update(ctx, server); err != nil {
+		log.Error(err, "failed to update status")
+		return err
+	}
+	return nil
+}
+
+// updateStatusWithRetry 재시도가 포함된 Status 업데이트
+func (r *NCloudServerReconciler) updateStatusWithRetry(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger, maxRetries int) error {
+	for i := 0; i < maxRetries; i++ {
+		if err := r.Status().Update(ctx, server); err != nil {
+			if i == maxRetries-1 {
+				log.Error(err, "failed to update status after all retries")
+				return err
+			}
+			log.V(1).Info("status update failed, retrying", "attempt", i+1, "error", err)
+			time.Sleep(time.Millisecond * 100) // 짧은 대기
+			continue
+		}
+		return nil
+	}
+	return nil
+}
+
+// createOrUpdateConfigMap Controller Utils의 CreateOrUpdate 패턴 사용 예시
+func (r *NCloudServerReconciler) createOrUpdateConfigMap(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) error {
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-config", server.Name),
+			Namespace: server.Namespace,
+		},
+	}
+
+	// Controller Utils의 CreateOrUpdate 패턴 사용
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
+		// Owner Reference 설정 (자동 가비지 컬렉션)
+		if err := controllerutil.SetControllerReference(server, configMap, r.Scheme); err != nil {
+			return err
+		}
+
+		// ConfigMap 데이터 설정
+		if configMap.Data == nil {
+			configMap.Data = make(map[string]string)
+		}
+		configMap.Data["server-name"] = server.Name
+		configMap.Data["vpc-no"] = server.Spec.VpcNo
+		configMap.Data["subnet-no"] = server.Spec.SubnetNo
+
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to create or update configmap")
+		return err
+	}
+
+	log.Info("configmap reconciled", "result", result)
+	return nil
 }
 
 // ServerInfo CLI에서 반환되는 서버 정보 구조체
