@@ -31,13 +31,17 @@ RUN apt-get update && apt-get install -y \
     openjdk-8-jre-headless \
     wget \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# NCloud CLI 복사 및 설정 (개발 중이므로 임시 경로 사용)
-COPY ncloud_cli_linux/ /opt/ncloud-cli/ncloud_cli_linux/
-
-# CLI 실행 권한 설정 및 스크립트 수정
-RUN chmod +x /opt/ncloud-cli/ncloud_cli_linux/ncloud
+# NCloud CLI 다운로드 및 설정
+RUN mkdir -p /opt/ncloud-cli && \
+    cd /opt/ncloud-cli && \
+    wget -O ncloud-cli.zip "https://github.com/NaverCloudPlatform/ncloud-cli/releases/download/v1.1.26/ncloud-cli-linux.zip" && \
+    unzip ncloud-cli.zip && \
+    mv ncloud-cli-linux ncloud_cli_linux && \
+    rm ncloud-cli.zip && \
+    chmod +x ncloud_cli_linux/ncloud
 
 # Final stage: 매니저 바이너리 + NCloud CLI
 FROM ubuntu:22.04
