@@ -3,12 +3,32 @@
 네이버 클라우드 플랫폼 VPC 환경에서 사용되는 NCloudServer Custom Resource의 상세 스펙 정의서입니다.
 
 ## 목차
-- [CRD 개요](#crd-Overview)
+- [CRD 개요](#crd-개요)
 - [Spec 필드 정의](#spec-필드-정의)
+  - [인증 설정](#인증-설정)
+  - [필수 필드](#필수-필드-required-fields)
+  - [이미지 설정](#이미지-설정-one-of-required)
+  - [서버 스펙 설정](#서버-스펙-설정)
+  - [네트워킹 설정](#네트워킹-설정)
+  - [보안 설정](#보안-설정)
+  - [고급 설정](#고급-설정)
+  - [저장소 설정](#저장소-설정)
+  - [GPU 설정](#gpu-설정)
+  - [디버깅 설정](#디버깅-설정)
 - [Status 필드 정의](#status-필드-정의)
-- [사용 가능한 값들](#사용-가능한-값들)
-- [예제 매니페스트](#예제-매니페스트)
+  - [서버 인스턴스 정보](#서버-인스턴스-정보)
+  - [서버 리소스 정보](#서버-리소스-정보)
+  - [네트워킹 정보](#네트워킹-정보)
+  - [상태 정보](#상태-정보)
+  - [플랫폼 정보](#플랫폼-정보)
+  - [타임스탬프 정보](#타임스탬프-정보)
+  - [Kubernetes 상태 정보](#kubernetes-상태-정보)
+  - [보안 및 접근 정보](#보안-및-접근-정보)
+  - [리전 및 존 정보](#리전-및-존-정보)
+  - [배치 및 GPU 정보](#배치-및-gpu-정보)
 - [유효성 검증 규칙](#유효성-검증-규칙)
+- [예제 매니페스트](#예제-매니페스트)
+- [관련 외부 리소스](#관련-외부-리소스)
 
 ## CRD 개요
 
@@ -30,6 +50,50 @@ status:
 ```
 
 ## Spec 필드 정의
+
+### 인증 설정
+
+#### `credentials`
+**설명**: NCloud 인증 설정  
+**타입**: `CredentialsSpec`  
+**설명**: NCloud API 접근을 위한 자격 증명 정보입니다.
+
+**예제**:
+```yaml
+credentials:
+  secretRef:
+    name: ncloud-credentials
+    namespace: ncloud-system
+```
+
+#### `CredentialsSpec` 구조
+- `secretRef`: Kubernetes Secret 참조
+
+#### `SecretReference` 구조
+- `name`: Secret 이름 (필수)
+- `namespace`: Secret 네임스페이스 (선택, 기본값: NCloudServer와 같은 네임스페이스)
+- `accessKeyIDKey`: Access Key ID가 저장된 키 (기본값: "access-key-id")
+- `secretAccessKeyKey`: Secret Access Key가 저장된 키 (기본값: "secret-access-key")
+
+**예제**:
+```yaml
+credentials:
+  secretRef:
+    name: ncloud-credentials
+    namespace: ncloud-system
+    # accessKeyIDKey: "access-key-id"        # 기본값 사용시 생략 가능
+    # secretAccessKeyKey: "secret-access-key" # 기본값 사용시 생략 가능
+```
+
+**커스텀 키 사용 예제**:
+```yaml
+credentials:
+  secretRef:
+    name: my-ncloud-secret
+    namespace: production
+    accessKeyIDKey: "ncloud-access-key"      # 커스텀 키명
+    secretAccessKeyKey: "ncloud-secret-key"  # 커스텀 키명
+```
 
 ### 필수 필드 (Required Fields)
 
@@ -528,6 +592,17 @@ serverInstanceOperation:
   codeName: "Server STOPBT OP"
 ```
 
+#### `serverInstanceStatusName`
+**설명**: 서버 인스턴스 상태명  
+**타입**: `string`  
+**설명**: 사람이 읽기 쉬운 상태 설명입니다.
+
+**예제**:
+```yaml
+serverInstanceStatusName: "Server RUN State"
+serverInstanceStatusName: "Server CREATDT State"
+```
+
 ### 플랫폼 정보
 
 #### `platformType`
@@ -552,6 +627,22 @@ platformType:
 #### `hypervisorType`
 **설명**: 하이퍼바이저 타입  
 **타입**: `StatusCode`
+
+#### `serverImageName`
+**설명**: 서버 이미지 이름  
+**타입**: `string`  
+**설명**: 실제 사용된 이미지의 이름입니다.
+
+**예제**:
+```yaml
+serverImageName: "Ubuntu Server 20.04"
+serverImageName: "Rocky Linux 8.10"
+```
+
+#### `serverInstanceType`
+**설명**: 서버 인스턴스 타입  
+**타입**: `StatusCode`  
+**설명**: 서버의 인스턴스 타입 정보입니다.
 
 ### 타임스탬프 정보
 
@@ -609,12 +700,71 @@ message: "Failed to create server: Invalid VPC configuration"
 **타입**: `int64`  
 **설명**: Operator가 마지막으로 처리한 Resource Generation 번호입니다.
 
+### 보안 및 접근 정보
+
+#### `loginKeyName`
+**설명**: 사용된 로그인 키 이름  
+**타입**: `string`  
+**설명**: 실제 서버에 적용된 SSH 키 이름입니다.
+
+#### `networkInterfaceNoList`
+**설명**: 네트워크 인터페이스 번호 목록  
+**타입**: `array[string]`  
+**설명**: 서버에 할당된 네트워크 인터페이스 번호들입니다.
+
+#### `isProtectServerTermination`
+**설명**: 서버 종료 보호 상태  
+**타입**: `boolean`  
+**설명**: 서버 종료 보호가 활성화되어 있는지 여부입니다.
+
+### 리전 및 존 정보
+
+#### `regionCode`
+**설명**: 리전 코드  
+**타입**: `string`  
+**설명**: 서버가 생성된 리전 코드입니다.
+
+#### `zoneCode`
+**설명**: 존 코드  
+**타입**: `string`  
+**설명**: 서버가 생성된 가용 영역 코드입니다.
+
+**예제**:
+```yaml
+zoneCode: "KR-1"  # 한국 리전 1존
+zoneCode: "KR-2"  # 한국 리전 2존
+```
+
+### 배치 및 GPU 정보
+
+#### `placementGroupNo`
+**설명**: 배치 그룹 번호  
+**타입**: `string`  
+**설명**: 서버가 속한 배치 그룹의 번호입니다.
+
+#### `placementGroupName`
+**설명**: 배치 그룹 이름  
+**타입**: `string`  
+**설명**: 서버가 속한 배치 그룹의 이름입니다.
+
+**예제**:
+```yaml
+placementGroupName: "production-cluster"
+placementGroupName: "development-nodes"
+```
+
+#### `fabricClusterPoolNo`
+**설명**: GPU 클러스터 풀 번호  
+**타입**: `string`  
+**설명**: GPU 서버가 속한 클러스터 풀 번호입니다.
+
 ## 유효성 검증 규칙
 
 ### 필수 필드 검증
-- `vpcNo`: 반드시 입력 필요
-- `subnetNo`: 반드시 입력 필요
+- `vpcNo`: 반드시 입력 필요 (omitempty 없음)
+- `subnetNo`: 반드시 입력 필요 (omitempty 없음)
 - 이미지 설정: `serverImageProductCode`, `memberServerImageInstanceNo`, `serverImageNo` 중 하나는 반드시 입력
+- `credentials.secretRef.name`: Secret 이름 필수
 
 ### 길이 및 형식 검증
 - `serverName`: 3-30자, 소문자/숫자/하이픈만 허용, 알파벳으로 시작
@@ -632,17 +782,67 @@ message: "Failed to create server: Invalid VPC configuration"
 ### 기본 예제
 - **파일**: `config/samples/server_v1_ncloudserver.yaml`
 - **용도**: 일반적인 서버 생성
-- **특징**: 필수 필드만 포함한 간단한 설정
+- **특징**: 필수 필드와 주요 선택 필드 포함한 표준 설정
+
+**주요 설정**:
+```yaml
+credentials:
+  secretRef:
+    name: ncloud-credentials
+    namespace: ncloud-system
+    # accessKeyIDKey: "access-key-id"        # 기본값 사용시 생략 가능
+    # secretAccessKeyKey: "secret-access-key" # 기본값 사용시 생략 가능
+```
 
 ### 최소 예제
 - **파일**: `config/samples/server_v1_ncloudserver_minimal.yaml`  
 - **용도**: 테스트용 서버 생성
 - **특징**: 가장 최소한의 필수 필드만 포함
 
+**최소 설정**:
+```yaml
+credentials:
+  secretRef:
+    name: ncloud-credentials
+    # namespace 생략시 NCloudServer와 같은 네임스페이스 사용
+    # accessKeyIDKey, secretAccessKeyKey 생략시 기본값 사용
+```
+
 ### 고급 예제
 - **파일**: `config/samples/server_v1_ncloudserver_advanced.yaml`
 - **용도**: 프로덕션 환경용 서버 생성  
 - **특징**: 모든 고급 기능 사용 예제
+
+**고급 설정**:
+```yaml
+credentials:
+  secretRef:
+    name: ncloud-credentials
+    namespace: ncloud-system
+    # 커스텀 키 사용 가능
+    accessKeyIDKey: "ncloud-access-key"
+    secretAccessKeyKey: "ncloud-secret-key"
+
+# 멀티 서버 생성
+serverCreateCount: 3
+serverCreateStartNo: 1
+
+# 고급 네트워킹
+networkInterfaceList:
+  - networkInterfaceOrder: 0
+    accessControlGroupNoList: ["acg-default"]
+  - networkInterfaceOrder: 1
+    subnetNo: "subnet-database"
+    accessControlGroupNoList: ["acg-database"]
+
+# GPU 및 스토리지 설정
+fabricClusterPoolNo: "gpu-cluster-pool-12345"
+isPreInstallGpuDriver: true
+blockStorageMappingList:
+  - order: 1
+    blockStorageSize: "500"
+    encrypted: true
+```
 
 ## 관련 외부 리소스
 
