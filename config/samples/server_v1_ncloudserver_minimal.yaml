@@ -1,0 +1,19 @@
+apiVersion: server.ncloud.devops.ai.kr/v1
+kind: NCloudServer
+metadata:
+  name: ncloud-server-minimal
+spec:
+  # NCloud authentication configuration (권장)
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      # namespace를 생략하면 NCloudServer와 같은 네임스페이스 사용
+
+  # Minimum required fields for VPC server creation
+
+  # One of these image options is required
+  serverImageProductCode: "SW.VSVR.OS.LNX64.UBNTU.SVR2004.B050"
+
+  # VPC configuration (required)
+  vpcNo: "vpc-12345"
+  subnetNo: "subnet-12345"

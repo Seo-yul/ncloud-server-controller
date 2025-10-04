@@ -4,6 +4,48 @@ metadata:
   labels:
     app.kubernetes.io/name: ncloud-server-controller
     app.kubernetes.io/managed-by: kustomize
-  name: ncloudserver-sample
+  name: ncloud-server-sample
 spec:
-  # TODO(user): Add fields here
+  # NCloud authentication configuration
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      namespace: ncloud-system
+
+  # Region configuration
+  regionCode: "KR"  # Korea region
+  
+  # Server image configuration (one of these required)
+  serverImageProductCode: "SW.VSVR.OS.LNX64.UBNTU.SVR2004.B050"  # Ubuntu 20.04 Linux
+  
+  # VPC configuration (required)
+  vpcNo: "vpc-12345"    # Your VPC number
+  subnetNo: "subnet-12345"  # Your subnet number
+  
+  # Server specification
+  serverProductCode: "SVR.VSVR.STAND.C002.M004.NET.SSD.B050.G001"  # Standard server spec
+  
+  # Server naming and description
+  serverName: "k8s-worker-node-01"
+  serverDescription: "Kubernetes worker node created by NCloud Operator"
+  
+  # Security configuration
+  loginKeyName: "my-ssh-key"  # Your SSH key pair
+  accessControlGroupNoList:
+    - "acg-12345"  # Your access control group
+  
+  # Scaling configuration
+  serverCreateCount: 1
+  serverCreateStartNo: 1
+  
+  # Protection configuration
+  isProtectServerTermination: true
+  
+  # Public IP configuration
+  associateWithPublicIp: true
+  
+  # Billing configuration
+  feeSystemTypeCode: "MTRAT"  # Hourly billing
+  
+  # Additional configuration (optional)
+  debugMode: false

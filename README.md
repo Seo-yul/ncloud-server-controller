@@ -151,7 +151,7 @@ kubectl apply -f config/samples/server_v1_ncloudserver.yaml
 kubectl get ncloudservers
 
 # 로그 확인
-kubectl logs -f deployment/ncloudserver-controller-manager -n ncloud-server-system
+kubectl logs -f deployment/ncloud-server-controller-manager -n ncloud-system
 ```
 
 ### 단계 6: 클러스터 배포
@@ -216,7 +216,7 @@ make deploy IMG=your-registry/ncloudserver:v0.0.1
 ### 환경변수 방식
 
 ```bash
-# 네이버 클라우드 API 키 설정
+# 네이버 클라우드 API 키 설정 (참고용 - 권장사항은 Secret 사용)
 export NCLOUD_ACCESS_KEY="your_access_key"
 export NCLOUD_SECRET_KEY="your_secret_key"
 
@@ -224,17 +224,19 @@ export NCLOUD_SECRET_KEY="your_secret_key"
 export NCLOUD_DEFAULT_REGION="KR"
 ```
 
+**⚠️ 주의**: 환경변수 방식보다는 **Secret 기반 방식이 더 안전하고 권장됩니다**.
+
 ### Kubernetes Secret 방식
 
 ```bash
 # Namespace 생성
-kubectl create namespace ncloud-server-system
+kubectl create namespace ncloud-system
 
 # 네이버 클라우드 인증 정보를 Secret으로 생성
 kubectl create secret generic ncloud-credentials \
-  --from-literal=access-key="your_access_key" \
-  --from-literal=secret-key="your_secret_key" \
-  -n ncloud-server-system
+  --from-literal=access-key-id="your_access_key" \
+  --from-literal=secret-access-key="your_secret_key" \
+  -n ncloud-system
 ```
 
 ## API 명령어 참고
@@ -256,7 +258,7 @@ ncloud vserver getServerInstanceList --regionCode KR
 
 ### 서버 삭제
 ```bash
-ncloud vserver eliminateServerInstances \
+ncloud vserver terminateServerInstances \
   --regionCode KR \
   --serverInstanceNoList "server-instance-no"
 ```
@@ -320,45 +322,64 @@ make bundle-push
 
 ## 실제 생성된 Custom Resource 예시
 
-**현재 생성된 Sample 파일** (`config/samples/server_v1_ncloudserver.yaml`):
+**실제 구현된 Sample 파일 예시** (`config/samples/server_v1_ncloudserver_minimal.yaml`):
 ```yaml
 apiVersion: server.ncloud.devops.ai.kr/v1
 kind: NCloudServer
 metadata:
-  labels:
-    app.kubernetes.io/name: ncloud-server-controller
-    app.kubernetes.io/managed-by: kustomize
-  name: ncloudserver-sample
+  name: ncloud-server-minimal
 spec:
-  # TODO(user): Add fields here
+  # 인증 정보 설정
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      # 네임스페이스 생략시 NCloudServer와 같은 네임스페이스 사용
+
+  # 필수 필드들
+  serverImageProductCode: "SW.VSVR.OS.LNX64.UBNTU.SVR2004.B050"
+  vpcNo: "vpc-12345"
+  subnetNo: "subnet-12345"
 ```
 
-**향후 구현할 목표 Custom Resource**:
+**고급 구성 예시** (`config/samples/server_v1_ncloudserver.yaml`):
 ```yaml
 apiVersion: server.ncloud.devops.ai.kr/v1
 kind: NCloudServer
 metadata:
-  name: web-server-01
-  namespace: default
+  name: ncloud-server-sample
+  labels:
+    app.kubernetes.io/name: ncloud-server-controller
 spec:
-  serverName: "kubernetes-web-node"
-  region: "KR"
-  zone: "KR-2"
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      namespace: ncloud-system
+  
+  regionCode: "KR"
   serverImageProductCode: "SW.VSVR.OS.LNX64.UBNTU.SVR2004.B050"
-  serverProductCode: "SVR.VSVR.STAND.C002.M008.NET.SSD.B050.G002"
-  loginKeyName: "k8s-cluster-key"
-  replicas: 3
+  vpcNo: "vpc-12345"
+  subnetNo: "subnet-12345"
+  serverProductCode: "SVR.VSVR.STAND.C002.M004.NET.SSD.B050.G001"
+  
+  serverName: "k8s-worker-node-01"
+  loginKeyName: "my-ssh-key"
+  accessControlGroupNoList: ["acg-12345"]
+  
+  isProtectServerTermination: true
+  associateWithPublicIp: true
+  feeSystemTypeCode: "MTRAT"
+  
 status:
-  phase: "Creating"
-  serverInstanceNumbers: []
-  message: "Server instances are being created"
+  phase: "Creating"  # Operator에서 자동 관리
+  message: "Server creation initiated"
+  lastReconcileTime: "2025-10-02T17:42:25Z"
 ```
 
 ## 디버깅 및 트러블슈팅
 
 ```bash
 # Operator 로그 실시간 확인
-kubectl logs -f -l control-plane=controller-manager -n ncloud-server-system
+kubectl logs -f -l control-plane=controller-manager -n ncloud-system
 
 # Custom Resource 이벤트 확인
 kubectl describe ncloudserver web-server-01
@@ -368,23 +389,125 @@ kubectl describe ncloudserver web-server-01
 ./ncloud_cli_linux/ncloud vserver getRegionList
 ```
 
+## NCloudServer CRD 스펙 정의
+
+이 Operator는 네이버 클라우드 플랫폼의 **VPC 환경**에서 서버를 관리합니다.
+
+### 🔐 인증 정보 관리 (필수 설정)
+
+이 Operator는 **Secret 기반의 안전한 인증 정보 관리**를 지원합니다.
+
+#### 1. 인증용 Secret 생성
+
+```bash
+# 방법 1: 직접 생성
+kubectl create secret generic ncloud-credentials \
+  --from-literal=access-key-id="YOUR_ACCESS_KEY" \
+  --from-literal=secret-access-key="YOUR_SECRET_KEY" \
+  --namespace=ncloud-system
+
+# 방법 2: 예제 파일 사용
+kubectl apply -f config/examples/ncloud-credentials-secret.yaml
+```
+
+#### 2. NCloudServer 리소스에 인증 정보 설정
+
+```yaml
+apiVersion: server.ncloud.devops.ai.kr/v1
+kind: NCloudServer
+metadata:
+  name: my-server
+spec:
+  # 인증 정보 설정 (권장)
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      namespace: ncloud-system
+      # 다음 필드들은 선택사항 (기본값 사용 가능)
+      # accessKeyIDKey: "access-key-id"
+      # secretAccessKeyKey: "secret-access-key"
+  
+  # 기타 서버 설정...
+  vpcNo: "vpc-12345"
+  subnetNo: "subnet-12345"
+```
+
+### 빠른 시작
+
+**전체 CRD 스펙 정의와 사용 가능한 모든 필드, 값들, 예제에 대한 상세 정보는 [CRD 스펙 정의서](docs/CRD_SPECIFICATION.md)를 참고하자.**
+
+### 예제 파일
+- `config/samples/server_v1_ncloudserver_minimal.yaml`: 최소 구성 (인증 정보 포함)
+- `config/samples/server_v1_ncloudserver.yaml`: 기본 예제 (표준 구성)
+- `config/samples/server_v1_ncloudserver_advanced.yaml`: 고급 구성 (모든 기능)
+
+### 사용 예제
+
+```bash
+# 1. 인증 정보 설정
+kubectl apply -f config/examples/ncloud-credentials-secret.yaml
+
+# 2. 서버 리소스 생성
+
+# 최소 구성으로 간단한 서버 생성
+kubectl apply -f config/samples/server_v1_ncloudserver_minimal.yaml
+
+# 표준 구성으로 서버 생성
+kubectl apply -f config/samples/server_v1_ncloudserver.yaml
+
+# 고급 기능이 포함된 서버 생성
+kubectl apply -f config/samples/server_v1_ncloudserver_advanced.yaml
+
+# 3. 리소스 확인
+kubectl get ncloudserver
+kubectl describe ncloudserver ncloud-server-minimal
+```
+
+### 리소스 삭제 프로세스
+
+이 Operator는 **Finalizer 기반의 안전한 리소스 삭제**를 지원합니다:
+
+```bash
+# 리소스 삭제 요청
+kubectl delete ncloudserver my-server
+
+# 삭제 프로세스:
+# 1. Operator가 NCloud 서버 삭제 실행
+# 2. 삭제 완료 확인
+# 3. CRD 리소스 완전 삭제
+```
+
+**정리하면**: 리소스를 삭제하면 **실제 NCloud 서버도 함께 안전하게 삭제**됩니다.
+
+## 문서
+
+- **[CRD 스펙 정의서](docs/CRD_SPECIFICATION.md)**: NCloudServer CRD의 상세 스펙, 사용 가능한 값들, 예제 매니페스트
+
 ## 참고 자료
 
 - [Kubernetes Operator SDK 문서](https://sdk.operatorframework.io/)
-- [네이버 클라우드 플랫폼 CLI 가이드](https://cli.ncloud-docs.com/docs/guide)
+- [네이버 클라우드 플랫폼 VPC CLI 가이드](https://cli.ncloud-docs.com/docs/cli-vserver)
 - [Go Operator 튜토리얼](https://sdk.operatorframework.io/docs/building-operators/golang/tutorial/)
 
 ## 개발 로드맵
 
 - [x] **개발 환경 설정 완료** (Go 1.23.1 darwin/arm64)
 - [x] **Operator SDK 프로젝트 초기화 완료**
-- [x] **기본 CRD 정의 완료** (`server.ncloud.devops.ai.kr/v1`)
+- [x] **NCloud VPC CLI 파라미터 조사 완료** (vserver 명령어 분석)
+- [x] **VPC 환경 CRD 스펙 정의 완료** (`server.ncloud.devops.ai.kr/v1`)
 - [x] **API 및 Controller 스켈레톤 생성** (`NCloudServer` Kind)
 - [x] **CRD 매니페스트 생성 완료**
-- [ ] 네이버 클라우드 CLI 연동
-- [ ] 서버 생성/삭제 로직 구현
-- [ ] 상태 동기화 구현
-- [ ] 웹훅 검증 추가
+- [x] **예제 매니페스트 작성 완료** (minimal, basic, advanced)
+- [x] **CRD 스펙 정의서 작성 완료** (`docs/CRD_SPECIFICATION.md`)
+- [x] **NCloud VPC CLI 연동 완료** (경로 문제 해결 및 Docker 통합)
+- [x] **서버 생성/삭제 로직 구현 완료** (reconciliation 상태 관리 포함)
+- [x] **상태 동기화 구현 완료** (Phase: Creating → Running → Failed/Terminating)
+- [x] **Docker 빌드 설정 완료** (CLI 포함 컨테이너 이미지)
+- [x] **Secret 기반 인증 정보 관리 구현 완료** (credentials 필드 및 Secret 참조)
+- [x] **Finalizer 기반 리소스 삭제 프로세스 구현 완료** (안전한 cleanup)
+- [x] **리소스 이름 중복 제거 및 네임스페이스 통일 완료** (`ncloud-system`)
+- [x] **매니페스트 완전성 및 검토 완료** (모든 CRD 및 샘플 검증)
+- [ ] JSON 응답 파싱 개선 (NCloud CLI 응답 구조 정확한 파싱 - 현재 strings.Contains 수준)
 - [ ] 모니터링 및 메트릭 추가
 - [ ] 테스트 커버리지 향상
-- [ ] 문서화 완성
+- [ ] 프로덕션 배포 가이드 완성

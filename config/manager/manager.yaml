@@ -5,13 +5,13 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: ncloud-server-controller
     app.kubernetes.io/managed-by: kustomize
-  name: system
+  name: ncloud-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
-  namespace: system
+  name: manager
+  namespace: ncloud-system
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: ncloud-server-controller
@@ -94,5 +94,5 @@ spec:
             memory: 64Mi
         volumeMounts: []
       volumes: []
-      serviceAccountName: controller-manager
+      serviceAccountName: manager
       terminationGracePeriodSeconds: 10

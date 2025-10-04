@@ -1,0 +1,90 @@
+apiVersion: server.ncloud.devops.ai.kr/v1
+kind: NCloudServer
+metadata:
+  name: ncloud-server-advanced
+  annotations:
+    ncloud.devops.ai.kr/debug: "true"
+spec:
+  # NCloud authentication configuration
+  credentials:
+    secretRef:
+      name: ncloud-credentials
+      namespace: ncloud-system
+
+  # Advanced configuration example
+  
+  regionCode: "KR"
+  
+  # Image configuration - using custom member server image
+  memberServerImageInstanceNo: "img-instance-12345"
+  
+  # VPC configuration
+  vpcNo: "vpc-67890"
+  subnetNo: "subnet-67890"
+  
+  # Server specification
+  serverSpecCode: "SVR.VSVR.STAND.C004.M008.NET.SSD.B050.G002"
+  
+  # Storage configuration
+  isEncryptedBaseBlockStorageVolume: true
+  
+  # Multiple server creation
+  serverCreateCount: 3
+  serverCreateStartNo: 1
+  
+  # Server naming with sequence
+  serverName: "k8s-cluster-node"
+  serverDescription: "Advanced Kubernetes cluster nodes with custom configuration"
+  
+  # Security configuration
+  loginKeyName: "production-ssh-key"
+  accessControlGroupNoList:
+    - "acg-web-servers"
+    - "acg-database-servers"
+  
+  # Network interface configuration
+  networkInterfaceList:
+    - networkInterfaceOrder: 0
+      accessControlGroupNoList:
+        - "acg-default"
+    - networkInterfaceOrder: 1
+      subnetNo: "subnet-database-67890"
+      accessControlGroupNoList:
+        - "acg-database-internal"
+  
+  # Protection and placement
+  isProtectServerTermination: true
+  placementGroupNo: "placement-group-12345"
+  
+  # Public IP configuration
+  associateWithPublicIp: true
+  
+  # Initialization script
+  initScriptNo: "init-script-12345"
+  
+  # Billing configuration
+  feeSystemTypeCode: "FXSUM"  # Monthly billing
+  
+  # Bare Metal configuration (if needed)
+  # raidTypeName: "RAID1"
+  # blockDevicePartitionList:
+  #   - mountPoint: "/"
+  #     partitionSize: "100"
+  #   - mountPoint: "/var"
+  #     partitionSize: "50"
+  
+  # Additional storage configuration
+  blockStorageMappingList:
+    - order: 1
+      blockStorageSize: "500"
+      blockStorageName: "data-volume"
+      blockStorageVolumeTypeCode: "SSD"
+      encrypted: true
+      emptyBlockStorage: true
+  
+  # GPU configuration
+  fabricClusterPoolNo: "gpu-cluster-pool-12345"
+  isPreInstallGpuDriver: true
+  
+  # Debug mode
+  debugMode: true

@@ -5,8 +5,8 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: ncloud-server-controller
     app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-service
-  namespace: system
+  name: manager-metrics-service
+  namespace: ncloud-system
 spec:
   ports:
   - name: https
