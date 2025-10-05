@@ -14,6 +14,8 @@
 - **멀티 아키텍처 지원**: `linux/amd64`, `linux/arm64`
 - **Finalizer 기반 삭제**: 안전한 리소스 정리
 - **실시간 상태 동기화**: 서버 상태를 Kubernetes에 반영
+- **자동 버전 관리**: Semantic Versioning 기반 릴리스
+- **로컬 개발 지원**: Git hooks 및 테스트 파이프라인
 - **GitOps 지원**: Git 기반 인프라 관리
 
 ## 📋 목차
@@ -22,13 +24,70 @@
 - [설치](#설치)
 - [사용법](#사용법)
 - [개발 환경 설정](#개발-환경-설정)
+- [버전 관리](#버전-관리)
 - [배포](#배포)
 - [문서](#문서)
+- [트러블슈팅](#트러블슈팅)
 - [기여하기](#기여하기)
 
 ## 🏃‍♂️ 빠른 시작
 
-### 1. Operator 설치
+### 1. 개발 환경 설정
+
+```bash
+# 저장소 클론
+git clone https://github.com/Seo-yul/ncloud-server-controller.git
+cd ncloud-server-controller
+
+# 개발 환경 설정 (Git hooks 포함)
+make dev-setup
+
+# 로컬 개발 워크플로우
+make dev-test       # 빠른 개발 테스트 (30초 이내)
+make validate-local # 완전한 로컬 검증
+make test-all       # 모든 테스트 실행
+make run-local      # 로컬에서 컨트롤러 실행
+```
+
+### 2. 로컬 테스트 파이프라인
+
+```bash
+# 빠른 피드백 (개발 중)
+make dev-test           # 빠른 테스트 (30초 이내)
+make test-quick         # 단위 테스트만 빠르게
+
+# 완전한 검증 (커밋 전)
+make validate-local     # 모든 로컬 체크
+make test-all          # 모든 테스트 실행
+
+# 특수 테스트
+make test-unit         # 단위 테스트만
+make test-integration  # 통합 테스트만
+make test-e2e         # E2E 테스트만
+make test-race        # Race condition 테스트
+make test-benchmark   # 벤치마크 테스트
+make test-coverage-full # 전체 커버리지 리포트
+```
+
+### 3. 버전 관리
+
+```bash
+# 버전 정보 확인
+make version-info      # 현재 버전 정보
+make version-check     # 버전 일관성 체크
+
+# 릴리스 생성
+make version-patch     # 패치 릴리스 (버그 수정)
+make version-minor     # 마이너 릴리스 (새 기능)
+make version-major     # 메이저 릴리스 (호환성 변경)
+
+# 또는 직접 스크립트 사용
+./scripts/version.sh patch   # 1.0.0 -> 1.0.1
+./scripts/version.sh minor   # 1.0.0 -> 1.1.0
+./scripts/version.sh major   # 1.0.0 -> 2.0.0
+```
+
+### 4. Operator 설치
 
 #### 방법 A: GitHub에서 직접 설치 (권장)
 
@@ -66,7 +125,7 @@ make install  # CRD만 설치
 make deploy   # 전체 배포
 ```
 
-### 2. 인증 정보 설정
+### 5. 인증 정보 설정
 
 ```bash
 # 네임스페이스 생성
@@ -79,7 +138,7 @@ kubectl create secret generic ncloud-credentials \
   --namespace=ncloud-system
 ```
 
-### 3. 서버 생성
+### 6. 서버 생성
 
 ```bash
 # 최소 구성으로 서버 생성
@@ -102,7 +161,7 @@ spec:
 EOF
 ```
 
-### 4. 상태 확인
+### 7. 상태 확인
 
 ```bash
 # 서버 상태 확인
@@ -120,7 +179,7 @@ kubectl logs -f deployment/ncloud-server-controller-manager -n ncloud-system
 ### Helm 설치 (권장)
 
 ```bash
-# Helm 차트 추가 (향후 지원 예정)
+# Helm 차트 추가
 helm repo add ncloud-controller https://charts.ncloud.devops.ai.kr
 helm install ncloud-controller ncloud-controller/ncloud-server-controller
 ```
@@ -260,6 +319,9 @@ operator-sdk version
 git clone https://github.com/Seo-yul/ncloud-server-controller.git
 cd ncloud-server-controller
 
+# 개발 환경 설정 (Git hooks 포함)
+make dev-setup
+
 # 의존성 설치
 go mod download
 
@@ -292,18 +354,90 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 make build
 # 1. 코드 수정
 vim internal/controller/ncloudserver_controller.go
 
-# 2. 테스트 실행
-make test
+# 2. 빠른 테스트
+make dev-test
 
-# 3. 린트 검사
-make lint
+# 3. 완전한 검증
+make validate-local
 
-# 4. 매니페스트 업데이트
-make manifests
+# 4. 커밋 (자동으로 pre-commit hook 실행)
+git add .
+git commit -m "feat: add new feature"
 
 # 5. 로컬 테스트
-make run
+make run-local
 ```
+
+## 🔄 버전 관리
+
+### Semantic Versioning
+
+이 프로젝트는 [Semantic Versioning](https://semver.org/)을 사용합니다:
+
+- **MAJOR**: 호환성을 깨뜨리는 변경사항
+- **MINOR**: 하위 호환성을 유지하면서 기능 추가
+- **PATCH**: 하위 호환성을 유지하면서 버그 수정
+
+### 버전 관리 명령어
+
+```bash
+# 현재 버전 정보 확인
+make version-info
+
+# 버전 일관성 체크
+make version-check
+
+# 패치 릴리스 (버그 수정)
+make version-patch
+# 예: 1.0.0 -> 1.0.1
+
+# 마이너 릴리스 (새 기능)
+make version-minor
+# 예: 1.0.0 -> 1.1.0
+
+# 메이저 릴리스 (호환성 변경)
+make version-major
+# 예: 1.0.0 -> 2.0.0
+```
+
+### 릴리스 프로세스
+
+1. **코드 변경 및 테스트**
+   ```bash
+   # 코드 수정
+   vim internal/controller/ncloudserver_controller.go
+   
+   # 로컬 테스트
+   make validate-local
+   ```
+
+2. **커밋 및 푸시**
+   ```bash
+   git add .
+   git commit -m "fix: resolve server creation timeout issue"
+   git push origin develop
+   ```
+
+3. **릴리스 생성**
+   ```bash
+   # 패치 릴리스
+   make version-patch
+   # → 자동으로 Git 태그 생성 및 푸시
+   # → GitHub Actions 자동 실행
+   # → 멀티아키텍처 이미지 빌드
+   # → GHCR에 이미지 배포
+   # → GitHub 릴리스 생성
+   ```
+
+### 자동 배포
+
+GitHub Actions가 다음을 자동으로 처리합니다:
+
+- **멀티아키텍처 이미지 빌드**: `linux/amd64`, `linux/arm64`
+- **GHCR 이미지 배포**: GitHub Container Registry
+- **Helm 차트 패키징**: 자동 버전 업데이트
+- **GitHub 릴리스 생성**: 릴리스 노트 및 자산 업로드
+- **매니페스트 업데이트**: Kubernetes 매니페스트 버전 동기화
 
 ## 🚀 배포
 
@@ -311,6 +445,8 @@ make run
 
 ```bash
 # 새 버전 태그 생성
+make version-patch
+# 또는
 git tag v1.0.1
 git push origin v1.0.1
 
@@ -457,6 +593,8 @@ curl -k https://localhost:8443/metrics
 - [x] **Finalizer 기반 삭제**: 안전한 리소스 정리
 - [x] **멀티 아키텍처 지원**: `linux/amd64`, `linux/arm64`
 - [x] **GitHub Actions CI/CD**: 자동 빌드 및 배포
+- [x] **자동 버전 관리**: Semantic Versioning 기반 릴리스
+- [x] **로컬 개발 지원**: Git hooks 및 테스트 파이프라인
 - [x] **문서화**: 완전한 CRD 스펙 정의서
 - [x] **예제 매니페스트**: 다양한 사용 사례
 

@@ -1,0 +1,34 @@
+#!/bin/bash
+# Pre-commit hook for NCloud Server Controller
+
+echo "🔍 Running pre-commit checks..."
+
+# Quick formatting
+echo "📝 Running go fmt..."
+go fmt ./...
+if [ $? -ne 0 ]; then
+    echo "❌ go fmt failed"
+    exit 1
+fi
+
+# Quick vet
+echo "🔍 Running go vet..."
+go vet ./...
+if [ $? -ne 0 ]; then
+    echo "❌ go vet failed"
+    exit 1
+fi
+
+# Optional: Lint check (if golangci-lint is available)
+if command -v golangci-lint >/dev/null 2>&1; then
+    echo "🔍 Running golangci-lint..."
+    golangci-lint run --timeout=2m
+    if [ $? -ne 0 ]; then
+        echo "❌ golangci-lint failed"
+        exit 1
+    fi
+else
+    echo "⚠️ golangci-lint not found, skipping..."
+fi
+
+echo "✅ All pre-commit checks passed!"

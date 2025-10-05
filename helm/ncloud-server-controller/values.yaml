@@ -1,0 +1,203 @@
+# Default values for ncloud-server-controller.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+global:
+  # Image registry
+  imageRegistry: ""
+  # Image pull secrets
+  imagePullSecrets: []
+  # Storage class
+  storageClass: ""
+
+# Operator configuration
+operator:
+  # Image settings
+  image:
+    repository: ghcr.io/seo-yul/ncloud-server-controller
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  
+  # Replica count
+  replicaCount: 1
+  
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Affinity
+  affinity: {}
+  
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  
+  # Container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - "ALL"
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 65532
+  
+  # Service account
+  serviceAccount:
+    # Specifies whether a service account should be created
+    create: true
+    # Annotations to add to the service account
+    annotations: {}
+    # The name of the service account to use.
+    # If not set and create is true, a name is generated using the fullname template
+    name: ""
+  
+  # Pod annotations
+  podAnnotations: {}
+  
+  # Pod labels
+  podLabels: {}
+  
+  # Environment variables
+  env: []
+  
+  # Command and args
+  command: ["/manager"]
+  args:
+    - "--leader-elect"
+    - "--health-probe-bind-address=:8081"
+  
+  # Liveness probe
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+  
+  # ClusterRole annotations
+  clusterRoleAnnotations: {}
+  
+  # ClusterRoleBinding annotations
+  clusterRoleBindingAnnotations: {}
+
+# CRD configuration
+crds:
+  # Specifies whether CRDs should be installed
+  install: true
+  
+  # CRD annotations
+  annotations: {}
+
+# Namespace configuration
+namespace:
+  # Specifies whether a namespace should be created
+  create: true
+  
+  # Namespace name (if not creating, specify existing namespace)
+  name: "ncloud-system"
+  
+  # Namespace annotations
+  annotations: {}
+  
+  # Namespace labels
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: ncloud-server-controller
+    app.kubernetes.io/managed-by: helm
+
+# Metrics configuration
+metrics:
+  # Specifies whether metrics service should be created
+  enabled: true
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  
+  # ServiceMonitor for Prometheus
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+# Network policy
+networkPolicy:
+  # Specifies whether network policy should be created
+  enabled: false
+  
+  # Ingress rules
+  ingress: []
+  
+  # Egress rules
+  egress: []
+
+# Pod disruption budget
+podDisruptionBudget:
+  # Specifies whether PDB should be created
+  enabled: false
+  
+  # Min available pods
+  minAvailable: 1
+  
+  # Max unavailable pods
+  maxUnavailable: 1
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  # Specifies whether HPA should be created
+  enabled: false
+  
+  # Min replicas
+  minReplicas: 1
+  
+  # Max replicas
+  maxReplicas: 10
+  
+  # Target CPU utilization
+  targetCPUUtilizationPercentage: 80
+  
+  # Target memory utilization
+  targetMemoryUtilizationPercentage: 80
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: ncloud-server-controller
+  app.kubernetes.io/instance: "{{ .Release.Name }}"
+  app.kubernetes.io/version: "{{ .Chart.AppVersion }}"
+  app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+  app.kubernetes.io/component: controller

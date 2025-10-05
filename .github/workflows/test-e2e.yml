@@ -2,31 +2,62 @@ name: E2E Tests
 
 on:
   push:
+    branches:
+      - main
+      - develop
   pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
 
 jobs:
-  test-e2e:
-    name: Run on Ubuntu
+  e2e:
+    name: E2E Tests
     runs-on: ubuntu-latest
     steps:
-      - name: Clone the code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
 
-      - name: Install the latest version of kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
 
-      - name: Verify kind installation
-        run: kind version
+    - name: Install Kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
 
-      - name: Running Test e2e
-        run: |
-          go mod tidy
-          make test-e2e
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.31.0'
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.15.0'
+
+    - name: Run E2E Tests
+      run: |
+        make test-e2e
+
+    - name: E2E Summary
+      run: |
+        echo "## 🧪 E2E Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **Kind Version**: $(kind version)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Kubectl Version**: $(kubectl version --client --short)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Helm Version**: $(helm version --short)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ✅ Passed" >> $GITHUB_STEP_SUMMARY

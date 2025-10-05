@@ -1,9 +1,9 @@
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
-# - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
-# - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+# - use the VERSION as arg of the bundle target (e.g make bundle VERSION=1.0.0)
+# - use environment variables to overwrite this value (e.g export VERSION=1.0.0)
+VERSION ?= 1.0.0
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -28,8 +28,8 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# ncloud.devops.ai.kr/ncloud-server-controller-bundle:$VERSION and ncloud.devops.ai.kr/ncloud-server-controller-catalog:$VERSION.
-IMAGE_TAG_BASE ?= ncloud.devops.ai.kr/ncloud-server-controller
+# ghcr.io/seo-yul/ncloud-server-controller-bundle:$VERSION and ghcr.io/seo-yul/ncloud-server-controller-catalog:$VERSION.
+IMAGE_TAG_BASE ?= ghcr.io/seo-yul/ncloud-server-controller
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -50,7 +50,7 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.41.1
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= ghcr.io/seo-yul/ncloud-server-controller:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -112,6 +112,13 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: test-coverage
+test-coverage: test ## Generate test coverage report
+	go tool cover -html=cover.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+	@echo "Coverage percentage:"
+	go tool cover -func=cover.out | tail -1
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
@@ -137,6 +144,19 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e-debug
+test-e2e-debug: setup-test-e2e manifests generate fmt vet ## Run the e2e tests with debug information.
+	@echo "Debugging E2E test environment..."
+	@echo "Kind cluster: $(KIND_CLUSTER)"
+	@echo "Project image: ncloud-server-controller:e2e-test"
+	@echo "Namespace: ncloud-system"
+	@echo "Checking Kind cluster status..."
+	$(KIND) get clusters
+	@echo "Checking loaded images..."
+	$(KIND) get nodes --name $(KIND_CLUSTER) | xargs -I {} docker exec {} crictl images
+	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
+	$(MAKE) cleanup-test-e2e
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
@@ -153,6 +173,22 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	$(GOLANGCI_LINT) config verify
 
+.PHONY: security-scan
+security-scan: ## Run security scan using gosec
+	@echo "Running security scan..."
+	@if command -v gosec >/dev/null 2>&1; then \
+		gosec ./...; \
+	else \
+		echo "gosec not found. Installing gosec..."; \
+		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+		gosec ./...; \
+	fi
+
+.PHONY: check-deps
+check-deps: ## Check for outdated dependencies
+	@echo "Checking for outdated dependencies..."
+	go list -u -m all
+
 ##@ Build
 
 .PHONY: build
@@ -162,6 +198,45 @@ build: manifests generate fmt vet ## Build manager binary.
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+.PHONY: run-local
+run-local: ## Run controller locally with development settings
+	@echo "Running controller locally..."
+	@echo "Make sure you have kubectl configured to point to your cluster"
+	go run ./cmd/main.go --leader-elect=false
+
+.PHONY: dev-setup
+dev-setup: ## Set up development environment
+	@echo "Setting up development environment..."
+	go mod download
+	go mod tidy
+	$(MAKE) manifests
+	$(MAKE) generate
+	$(MAKE) setup-hooks
+	@echo "Development environment ready!"
+
+.PHONY: setup-hooks
+setup-hooks: ## Set up Git hooks for pre-commit checks
+	@echo "Setting up Git hooks..."
+	@if [ -f "scripts/setup-hooks.sh" ]; then \
+		./scripts/setup-hooks.sh; \
+	else \
+		echo "❌ setup-hooks.sh not found"; \
+		exit 1; \
+	fi
+
+.PHONY: local-check
+local-check: ## Run all local checks (fmt, vet, lint, test)
+	@echo "🔍 Running local checks..."
+	@echo "📝 Formatting code..."
+	@$(MAKE) fmt
+	@echo "🔍 Running go vet..."
+	@$(MAKE) vet
+	@echo "🔍 Running linter..."
+	@$(MAKE) lint
+	@echo "🧪 Running tests..."
+	@$(MAKE) test
+	@echo "✅ All local checks passed!"
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -229,6 +304,49 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
+
+.PHONY: helm-lint
+helm-lint: ## Lint Helm chart
+	helm lint helm/ncloud-server-controller
+
+.PHONY: helm-template
+helm-template: ## Template Helm chart
+	helm template test-release helm/ncloud-server-controller --dry-run
+
+.PHONY: helm-package
+helm-package: ## Package Helm chart
+	mkdir -p dist
+	helm package helm/ncloud-server-controller -d dist/
+
+.PHONY: helm-install
+helm-install: helm-package ## Install Helm chart locally
+	helm install ncloud-server-controller dist/ncloud-server-controller-*.tgz
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall Helm chart
+	helm uninstall ncloud-server-controller
+
+.PHONY: github-release
+github-release: ## Create GitHub release with assets
+	@echo "Creating GitHub release for version $(VERSION)..."
+	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+		echo "Error: GITHUB_TOKEN environment variable is required"; \
+		exit 1; \
+	fi
+	gh release create v$(VERSION) \
+		--title "Release v$(VERSION)" \
+		--notes "NCloud Server Controller v$(VERSION)" \
+		dist/*.tgz || echo "Release may already exist"
+
+.PHONY: clean
+clean: ## Clean build artifacts and temporary files
+	@echo "Cleaning build artifacts..."
+	rm -rf dist/
+	rm -f cover.out coverage.html
+	rm -f Dockerfile.cross
+	@echo "Cleaning bin directory (excluding k8s binaries)..."
+	@find bin/ -type f ! -path "*/k8s/*" -delete 2>/dev/null || true
+	@echo "Cleanup complete"
 
 ##@ Deployment
 
@@ -393,3 +511,154 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+##@ CI/CD Pipeline
+
+.PHONY: ci-build
+ci-build: manifests generate fmt vet lint test ## Complete CI build pipeline
+	@echo "CI build pipeline completed successfully"
+
+.PHONY: ci-test
+ci-test: test test-coverage ## Complete CI test pipeline
+	@echo "CI test pipeline completed successfully"
+
+.PHONY: ci-release
+ci-release: ci-build helm-package github-release ## Complete CI release pipeline
+	@echo "CI release pipeline completed successfully"
+
+.PHONY: pre-commit
+pre-commit: fmt vet lint test ## Run pre-commit checks
+	@echo "Pre-commit checks completed successfully"
+
+.PHONY: all-checks
+all-checks: pre-commit security-scan check-deps ## Run all quality checks
+	@echo "All quality checks completed successfully"
+
+##@ Local Testing Pipeline
+
+.PHONY: test-unit
+test-unit: ## Run unit tests only
+	@echo "🧪 Running unit tests..."
+	go test -short ./internal/... ./api/... -v
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "🔗 Running integration tests..."
+	go test ./test/integration/... -v
+
+.PHONY: test-all
+test-all: ## Run all tests (unit + integration + e2e)
+	@echo "🧪 Running all tests..."
+	@echo "1️⃣ Unit tests..."
+	@$(MAKE) test-unit
+	@echo "2️⃣ Integration tests..."
+	@$(MAKE) test-integration
+	@echo "3️⃣ E2E tests..."
+	@$(MAKE) test-e2e
+	@echo "✅ All tests completed!"
+
+.PHONY: test-quick
+test-quick: ## Quick test (unit tests only, no coverage)
+	@echo "⚡ Running quick tests..."
+	go test -short ./internal/... ./api/... -v -timeout=30s
+
+.PHONY: test-coverage-full
+test-coverage-full: ## Generate comprehensive test coverage report
+	@echo "📊 Generating comprehensive test coverage..."
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	go tool cover -func=coverage.out | tail -1
+	@echo "Coverage report: coverage.html"
+
+.PHONY: test-benchmark
+test-benchmark: ## Run benchmark tests
+	@echo "🏃 Running benchmark tests..."
+	go test -bench=. -benchmem ./internal/...
+
+.PHONY: test-race
+test-race: ## Run tests with race detection
+	@echo "🏁 Running tests with race detection..."
+	go test -race ./internal/... ./api/...
+
+.PHONY: test-stress
+test-stress: ## Run stress tests
+	@echo "💪 Running stress tests..."
+	go test -count=10 -race ./internal/...
+
+.PHONY: validate-local
+validate-local: ## Complete local validation pipeline
+	@echo "🔍 Running complete local validation..."
+	@echo "1️⃣ Code formatting..."
+	@$(MAKE) fmt
+	@echo "2️⃣ Static analysis..."
+	@$(MAKE) vet
+	@echo "3️⃣ Linting..."
+	@$(MAKE) lint
+	@echo "4️⃣ Security scan..."
+	@$(MAKE) security-scan
+	@echo "5️⃣ Unit tests..."
+	@$(MAKE) test-unit
+	@echo "6️⃣ Dependencies check..."
+	@$(MAKE) check-deps
+	@echo "✅ Local validation completed successfully!"
+
+.PHONY: dev-test
+dev-test: ## Development testing pipeline (fast feedback)
+	@echo "🚀 Running development test pipeline..."
+	@echo "1️⃣ Quick formatting..."
+	@$(MAKE) fmt
+	@echo "2️⃣ Quick vet..."
+	@$(MAKE) vet
+	@echo "3️⃣ Quick tests..."
+	@$(MAKE) test-quick
+	@echo "✅ Development tests completed!"
+
+.PHONY: ci-local
+ci-local: ## Run full CI pipeline locally
+	@echo "🏗️ Running full CI pipeline locally..."
+	@echo "1️⃣ Build pipeline..."
+	@$(MAKE) ci-build
+	@echo "2️⃣ Test pipeline..."
+	@$(MAKE) ci-test
+	@echo "3️⃣ Quality checks..."
+	@$(MAKE) all-checks
+	@echo "✅ Full CI pipeline completed locally!"
+
+##@ Version Management
+
+.PHONY: version-info
+version-info: ## Show current version information
+	@echo "📦 Version Information"
+	@echo "===================="
+	@echo "Current version: $(VERSION)"
+	@echo "Image tag base: $(IMAGE_TAG_BASE)"
+	@echo "Current image: $(IMG)"
+	@echo ""
+	@echo "Version management:"
+	@echo "  make version-patch  - Create patch release"
+	@echo "  make version-minor  - Create minor release"
+	@echo "  make version-major  - Create major release"
+	@echo "  make version-info   - Show this information"
+
+.PHONY: version-patch
+version-patch: ## Create patch release (bug fixes)
+	@echo "🔧 Creating patch release..."
+	@./scripts/version.sh patch
+
+.PHONY: version-minor
+version-minor: ## Create minor release (new features)
+	@echo "✨ Creating minor release..."
+	@./scripts/version.sh minor
+
+.PHONY: version-major
+version-major: ## Create major release (breaking changes)
+	@echo "🚀 Creating major release..."
+	@./scripts/version.sh major
+
+.PHONY: version-check
+version-check: ## Check version consistency across files
+	@echo "🔍 Checking version consistency..."
+	@echo "Makefile VERSION: $(VERSION)"
+	@echo "Helm Chart version: $$(grep '^version:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
+	@echo "Helm Chart appVersion: $$(grep '^appVersion:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
+	@echo "Latest git tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags found')"

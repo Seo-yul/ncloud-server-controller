@@ -1,0 +1,29 @@
+name: Dependencies Check
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # 매주 월요일 오전 2시
+  workflow_dispatch:
+
+jobs:
+  dependencies:
+    name: Check Dependencies
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Check Dependencies
+      run: |
+        make check-deps
+
+    - name: Dependencies Summary
+      run: |
+        echo "## 📦 Dependencies Check Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **Check**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+        echo "- **Schedule**: Weekly (Monday 2 AM)" >> $GITHUB_STEP_SUMMARY

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -323,22 +324,92 @@ type ServerInfo struct {
 	ServerImageName   string `json:"serverImageName"`
 }
 
-// createServer 실제 서버 생성 CLI 실행
-func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) error {
-	log.Info("Executing server creation command")
+// ServerStatusResponse 서버 상태 조회 응답 구조체
+type ServerStatusResponse struct {
+	GetServerInstanceListResponse struct {
+		RequestID          string `json:"requestId"`
+		ReturnCode         string `json:"returnCode"`
+		ReturnMessage      string `json:"returnMessage"`
+		ServerInstanceList []struct {
+			ServerInstanceNo         string `json:"serverInstanceNo"`
+			ServerInstanceStatus     string `json:"serverInstanceStatus.code"`
+			ServerInstanceStatusName string `json:"serverInstanceStatusName"`
+		} `json:"serverInstanceList"`
+	} `json:"getServerInstanceListResponse"`
+}
 
-	// CLI 인자 구성
+// ServerInstance 서버 인스턴스 정보 구조체
+type ServerInstance struct {
+	ServerInstanceNo           string   `json:"serverInstanceNo"`
+	ServerName                 string   `json:"serverName"`
+	ServerInstanceStatusName   string   `json:"serverInstanceStatusName"`
+	ServerInstanceOperation    string   `json:"serverInstanceOperation"`
+	ServerInstanceStatus       string   `json:"serverInstanceStatus"`
+	PlatformType               string   `json:"platformType"`
+	LoginKeyName               string   `json:"loginKeyName"`
+	IsFeeChargingMonitoring    bool     `json:"isFeeChargingMonitoring"`
+	PublicIp                   string   `json:"publicIp"`
+	PrivateIp                  string   `json:"privateIp"`
+	ServerImageName            string   `json:"serverImageName"`
+	ServerInstanceType         string   `json:"serverInstanceType"`
+	RegionCode                 string   `json:"regionCode"`
+	ZoneCode                   string   `json:"zoneCode"`
+	VpcNo                      string   `json:"vpcNo"`
+	SubnetNo                   string   `json:"subnetNo"`
+	NetworkInterfaceNoList     []string `json:"networkInterfaceNoList"`
+	PlacementGroupName         string   `json:"placementGroupName"`
+	FabricClusterPoolNo        string   `json:"fabricClusterPoolNo"`
+	IsProtectServerTermination bool     `json:"isProtectServerTermination"`
+}
+
+// CreateServerResponse 서버 생성 응답 구조체
+type CreateServerResponse struct {
+	CreateServerInstancesResponse struct {
+		RequestID          string           `json:"requestId"`
+		ReturnCode         string           `json:"returnCode"`
+		ReturnMessage      string           `json:"returnMessage"`
+		ServerInstanceList []ServerInstance `json:"serverInstanceList"`
+	} `json:"createServerInstancesResponse"`
+}
+
+// buildServerCreationArgs CLI 인자 구성
+func (r *NCloudServerReconciler) buildServerCreationArgs(server *serverv1.NCloudServer) []string {
 	args := []string{"vserver", "createServerInstances", "--output", "json"}
 
 	// 필수 파라미터
+	args = r.addRequiredServerArgs(args, server)
+
+	// 이미지 설정
+	args = r.addImageServerArgs(args, server)
+
+	// 선택적 파라미터들
+	args = r.addOptionalServerArgs(args, server)
+
+	// 네트워크 인터페이스 설정
+	args = r.addNetworkInterfaceServerArgs(args, server)
+
+	// 블록 스토리지 매핑
+	args = r.addBlockStorageServerArgs(args, server)
+
+	// 파티션 설정
+	args = r.addPartitionServerArgs(args, server)
+
+	return args
+}
+
+// addRequiredServerArgs 필수 파라미터 추가
+func (r *NCloudServerReconciler) addRequiredServerArgs(args []string, server *serverv1.NCloudServer) []string {
 	if server.Spec.VpcNo != "" {
 		args = append(args, "--vpcNo", server.Spec.VpcNo)
 	}
 	if server.Spec.SubnetNo != "" {
 		args = append(args, "--subnetNo", server.Spec.SubnetNo)
 	}
+	return args
+}
 
-	// 이미지 설정 (필수 중 하나)
+// addImageServerArgs 이미지 설정 추가
+func (r *NCloudServerReconciler) addImageServerArgs(args []string, server *serverv1.NCloudServer) []string {
 	if server.Spec.ServerImageProductCode != "" {
 		args = append(args, "--serverImageProductCode", server.Spec.ServerImageProductCode)
 	} else if server.Spec.MemberServerImageInstanceNo != "" {
@@ -346,29 +417,32 @@ func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serve
 	} else if server.Spec.ServerImageNo != "" {
 		args = append(args, "--serverImageNo", server.Spec.ServerImageNo)
 	}
+	return args
+}
 
-	// 선택적 파라미터들
-	if server.Spec.RegionCode != "" {
-		args = append(args, "--regionCode", server.Spec.RegionCode)
+// addOptionalServerArgs 선택적 파라미터 추가
+func (r *NCloudServerReconciler) addOptionalServerArgs(args []string, server *serverv1.NCloudServer) []string {
+	optionalParams := map[string]string{
+		"regionCode":          server.Spec.RegionCode,
+		"serverProductCode":   server.Spec.ServerProductCode,
+		"serverSpecCode":      server.Spec.ServerSpecCode,
+		"serverName":          server.Spec.ServerName,
+		"serverDescription":   server.Spec.ServerDescription,
+		"loginKeyName":        server.Spec.LoginKeyName,
+		"feeSystemTypeCode":   server.Spec.FeeSystemTypeCode,
+		"placementGroupNo":    server.Spec.PlacementGroupNo,
+		"raidTypeName":        server.Spec.RaidTypeName,
+		"initScriptNo":        server.Spec.InitScriptNo,
+		"fabricClusterPoolNo": server.Spec.FabricClusterPoolNo,
 	}
-	if server.Spec.ServerProductCode != "" {
-		args = append(args, "--serverProductCode", server.Spec.ServerProductCode)
+
+	for param, value := range optionalParams {
+		if value != "" {
+			args = append(args, "--"+param, value)
+		}
 	}
-	if server.Spec.ServerSpecCode != "" {
-		args = append(args, "--serverSpecCode", server.Spec.ServerSpecCode)
-	}
-	if server.Spec.ServerName != "" {
-		args = append(args, "--serverName", server.Spec.ServerName)
-	}
-	if server.Spec.ServerDescription != "" {
-		args = append(args, "--serverDescription", server.Spec.ServerDescription)
-	}
-	if server.Spec.LoginKeyName != "" {
-		args = append(args, "--loginKeyName", server.Spec.LoginKeyName)
-	}
-	if server.Spec.FeeSystemTypeCode != "" {
-		args = append(args, "--feeSystemTypeCode", server.Spec.FeeSystemTypeCode)
-	}
+
+	// 숫자 파라미터들
 	if server.Spec.ServerCreateCount > 0 {
 		args = append(args, "--serverCreateCount", fmt.Sprintf("%d", server.Spec.ServerCreateCount))
 	}
@@ -376,6 +450,22 @@ func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serve
 		args = append(args, "--serverCreateStartNo", fmt.Sprintf("%d", server.Spec.ServerCreateStartNo))
 	}
 
+	// Boolean 파라미터들
+	if server.Spec.IsProtectServerTermination {
+		args = append(args, "--isProtectServerTermination", "true")
+	}
+	if server.Spec.AssociateWithPublicIp {
+		args = append(args, "--associateWithPublicIp", "true")
+	}
+	if server.Spec.IsEncryptedBaseBlockStorageVolume {
+		args = append(args, "--isEncryptedBaseBlockStorageVolume", "true")
+	}
+
+	return args
+}
+
+// addNetworkInterfaceServerArgs 네트워크 인터페이스 설정 추가
+func (r *NCloudServerReconciler) addNetworkInterfaceServerArgs(args []string, server *serverv1.NCloudServer) []string {
 	// 네트워크 인터페이스 설정
 	if len(server.Spec.NetworkInterfaceList) > 0 {
 		for _, ni := range server.Spec.NetworkInterfaceList {
@@ -394,86 +484,58 @@ func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serve
 		}
 	}
 
+	// 접근 제어 그룹 (기본 네트워크 인터페이스)
 	if len(server.Spec.AccessControlGroupNoList) > 0 {
 		acgList := strings.Join(server.Spec.AccessControlGroupNoList, ",")
 		args = append(args, "--networkInterfaceList", fmt.Sprintf("networkInterfaceOrder=0,accessControlGroupNoList=[%s]", acgList))
 	}
 
-	// 기타 옵션들
-	if server.Spec.IsProtectServerTermination {
-		args = append(args, "--isProtectServerTermination", "true")
-	}
-	if server.Spec.AssociateWithPublicIp {
-		args = append(args, "--associateWithPublicIp", "true")
-	}
-	if server.Spec.IsEncryptedBaseBlockStorageVolume {
-		args = append(args, "--isEncryptedBaseBlockStorageVolume", "true")
-	}
-	if server.Spec.PlacementGroupNo != "" {
-		args = append(args, "--placementGroupNo", server.Spec.PlacementGroupNo)
-	}
-	if server.Spec.InitScriptNo != "" {
-		args = append(args, "--initScriptNo", server.Spec.InitScriptNo)
-	}
-	if server.Spec.RaidTypeName != "" {
-		args = append(args, "--raidTypeName", server.Spec.RaidTypeName)
-	}
+	return args
+}
 
-	// 추가 스토리지 설정 (BlockStorageMapping)
-	if len(server.Spec.BlockStorageMappingList) > 0 {
-		for i, bgm := range server.Spec.BlockStorageMappingList {
-			bgmArg := fmt.Sprintf("order=%d", i+1)
-			if bgm.BlockStorageSize != "" {
-				bgmArg += fmt.Sprintf(",blockStorageSize=%s", bgm.BlockStorageSize)
-			}
-			if bgm.BlockStorageName != "" {
-				bgmArg += fmt.Sprintf(",blockStorageName=%s", bgm.BlockStorageName)
-			}
-			if bgm.BlockStorageVolumeTypeCode != "" {
-				bgmArg += fmt.Sprintf(",blockStorageVolumeTypeCode=%s", bgm.BlockStorageVolumeTypeCode)
-			}
-			if bgm.Encrypted {
-				bgmArg += ",encrypted=true"
-			}
-			if bgm.NoBlockStorage {
-				bgmArg += ",noBlockStorage=true"
-			}
-			if bgm.EmptyBlockStorage {
-				bgmArg += ",emptyBlockStorage=true"
-			}
-			args = append(args, "--blockStorageMappingList", bgmArg)
+// addBlockStorageServerArgs 블록 스토리지 매핑 추가
+func (r *NCloudServerReconciler) addBlockStorageServerArgs(args []string, server *serverv1.NCloudServer) []string {
+	for _, mapping := range server.Spec.BlockStorageMappingList {
+		if mapping.BlockStorageName != "" {
+			args = append(args, "--blockStorageName", mapping.BlockStorageName)
+		}
+		if mapping.BlockStorageSize != "" {
+			args = append(args, "--blockStorageSize", mapping.BlockStorageSize)
+		}
+		if mapping.BlockStorageVolumeTypeCode != "" {
+			args = append(args, "--blockStorageVolumeTypeCode", mapping.BlockStorageVolumeTypeCode)
+		}
+		if mapping.EmptyBlockStorage {
+			args = append(args, "--emptyBlockStorage")
+		}
+		if mapping.Encrypted {
+			args = append(args, "--encrypted")
+		}
+		if mapping.NoBlockStorage {
+			args = append(args, "--noBlockStorage")
 		}
 	}
+	return args
+}
 
-	// GPU 설정
-	if server.Spec.FabricClusterPoolNo != "" {
-		args = append(args, "--fabricClusterPoolNo", server.Spec.FabricClusterPoolNo)
-	}
-	if server.Spec.IsPreInstallGpuDriver {
-		args = append(args, "--isPreInstallGpuDriver", "true")
-	}
-
-	// 파티션 설정 (Bare Metal)
-	if len(server.Spec.BlockDevicePartitionList) > 0 {
-		for _, bdp := range server.Spec.BlockDevicePartitionList {
-			if bdp.MountPoint != "" && bdp.PartitionSize != "" {
-				partArg := fmt.Sprintf("mountPoint=%s,partitionSize=%s", bdp.MountPoint, bdp.PartitionSize)
-				args = append(args, "--blockDevicePartitionList", partArg)
-			}
+// addPartitionServerArgs 파티션 설정 추가
+func (r *NCloudServerReconciler) addPartitionServerArgs(args []string, server *serverv1.NCloudServer) []string {
+	for _, partition := range server.Spec.BlockDevicePartitionList {
+		if partition.MountPoint != "" {
+			args = append(args, "--mountPoint", partition.MountPoint)
+		}
+		if partition.PartitionSize != "" {
+			args = append(args, "--partitionSize", partition.PartitionSize)
 		}
 	}
+	return args
+}
 
-	// 디버그 모드
-	if server.Spec.DebugMode {
-		args = append(args, "--debug")
-	}
-
+// executeServerCreationCLI CLI 명령 실행
+func (r *NCloudServerReconciler) executeServerCreationCLI(args []string, log logr.Logger) ([]byte, error) {
 	log.Info("Executing CLI command", "args", args)
 
-	// 커맨드 실행 (상대 경로 문제 해결 포함)
-	cmd := exec.CommandContext(ctx, r.NCloudCliPath, args...)
-
-	// 컨테이너 내에서 CLI를 절대 경로로 찾도록 설정
+	cmd := exec.Command(r.NCloudCliPath, args...)
 	if r.NCloudCliPath == defaultCliPath {
 		cliDir := filepath.Dir(r.NCloudCliPath)
 		cmd.Dir = cliDir
@@ -481,17 +543,92 @@ func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serve
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Error(err, "CLI command failed", "output", string(output))
-		return fmt.Errorf("CLI command failed: %v, output: %s", err, string(output))
+		log.Error(err, "Failed to execute CLI command", "output", string(output))
+		return nil, fmt.Errorf("failed to execute CLI command: %w", err)
 	}
 
 	log.Info("CLI command executed successfully", "output", string(output))
+	return output, nil
+}
 
-	// 응답에서 서버 인스턴스 번호 추출
-	// 실제로는 JSON 파싱을 해야 하지만, 간단히 하기 위해 여기서는 성공 확인만
-	server.Status.ServerInstanceNo = tempInstanceNo // 임시값
+// parseServerCreationResponse 서버 생성 응답 파싱
+func (r *NCloudServerReconciler) parseServerCreationResponse(output []byte, log logr.Logger) (*ServerInstance, error) {
+	var response CreateServerResponse
+	if err := json.Unmarshal(output, &response); err != nil {
+		log.Error(err, "Failed to parse CLI response", "output", string(output))
+		return nil, fmt.Errorf("failed to parse CLI response: %w", err)
+	}
 
+	// 응답 검증
+	if response.CreateServerInstancesResponse.ReturnCode != "0" {
+		log.Error(nil, "CLI command failed", "returnCode", response.CreateServerInstancesResponse.ReturnCode, "returnMessage", response.CreateServerInstancesResponse.ReturnMessage)
+		return nil, fmt.Errorf("CLI command failed: %s", response.CreateServerInstancesResponse.ReturnMessage)
+	}
+
+	// 서버 인스턴스 정보 추출
+	if len(response.CreateServerInstancesResponse.ServerInstanceList) == 0 {
+		log.Error(nil, "No server instances returned from CLI")
+		return nil, fmt.Errorf("no server instances returned from CLI")
+	}
+
+	return &response.CreateServerInstancesResponse.ServerInstanceList[0], nil
+}
+
+// updateServerCreationStatus 서버 생성 상태 업데이트
+func (r *NCloudServerReconciler) updateServerCreationStatus(ctx context.Context, server *serverv1.NCloudServer, serverInstance *ServerInstance, log logr.Logger) error {
+	server.Status.Phase = serverPhaseCreating
+	server.Status.Message = "Server is being created"
+	server.Status.ServerInstanceNo = serverInstance.ServerInstanceNo
+	server.Status.ServerName = serverInstance.ServerName
+	server.Status.ServerInstanceStatusName = serverInstance.ServerInstanceStatusName
+	server.Status.ServerInstanceOperation = serverv1.StatusCode{Code: serverInstance.ServerInstanceOperation}
+	server.Status.ServerInstanceStatus = serverv1.StatusCode{Code: serverInstance.ServerInstanceStatus}
+	server.Status.PlatformType = serverv1.StatusCode{Code: serverInstance.PlatformType}
+	server.Status.LoginKeyName = serverInstance.LoginKeyName
+	server.Status.PublicIp = serverInstance.PublicIp
+	server.Status.PrivateIp = serverInstance.PrivateIp
+	server.Status.ServerImageName = serverInstance.ServerImageName
+	server.Status.ServerInstanceType = serverv1.StatusCode{Code: serverInstance.ServerInstanceType}
+	server.Status.RegionCode = serverInstance.RegionCode
+	server.Status.ZoneCode = serverInstance.ZoneCode
+	server.Status.VpcNo = serverInstance.VpcNo
+	server.Status.SubnetNo = serverInstance.SubnetNo
+	server.Status.NetworkInterfaceNoList = serverInstance.NetworkInterfaceNoList
+	server.Status.PlacementGroupName = serverInstance.PlacementGroupName
+	server.Status.FabricClusterPoolNo = serverInstance.FabricClusterPoolNo
+	server.Status.IsProtectServerTermination = serverInstance.IsProtectServerTermination
+
+	if err := r.Status().Update(ctx, server); err != nil {
+		log.Error(err, "Failed to update server status")
+		return fmt.Errorf("failed to update server status: %w", err)
+	}
+
+	log.Info("Server creation initiated", "serverInstanceNo", serverInstance.ServerInstanceNo)
 	return nil
+}
+
+// createServer 실제 서버 생성 CLI 실행
+// createServer 실제 서버 생성 CLI 실행
+func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serverv1.NCloudServer, log logr.Logger) error {
+	log.Info("Executing server creation command")
+
+	// CLI 인자 구성
+	args := r.buildServerCreationArgs(server)
+
+	// CLI 실행
+	output, err := r.executeServerCreationCLI(args, log)
+	if err != nil {
+		return err
+	}
+
+	// 응답 파싱 및 검증
+	serverInstance, err := r.parseServerCreationResponse(output, log)
+	if err != nil {
+		return err
+	}
+
+	// 상태 업데이트
+	return r.updateServerCreationStatus(ctx, server, serverInstance, log)
 }
 
 // deleteServer 서버 삭제 CLI 실행
@@ -540,7 +677,36 @@ func (r *NCloudServerReconciler) getServerStatus(ctx context.Context, serverInst
 
 	log.Info("Server status retrieved", "output", string(output))
 
-	// 간단한 상태 파싱 (실제로는 JSON 파싱 필요)
+	// 구조화된 JSON 파싱
+	var response ServerStatusResponse
+	if err := json.Unmarshal(output, &response); err != nil {
+		log.Error(err, "Failed to parse server status response", "output", string(output))
+		// JSON 파싱 실패 시 기존 방식으로 폴백
+		return r.parseServerStatusFallback(output, log)
+	}
+
+	// 응답 검증
+	if response.GetServerInstanceListResponse.ReturnCode != "0" {
+		log.Error(nil, "Server status command failed", "returnCode", response.GetServerInstanceListResponse.ReturnCode, "returnMessage", response.GetServerInstanceListResponse.ReturnMessage)
+		return "", fmt.Errorf("server status command failed: %s", response.GetServerInstanceListResponse.ReturnMessage)
+	}
+
+	// 서버 인스턴스 상태 추출
+	if len(response.GetServerInstanceListResponse.ServerInstanceList) == 0 {
+		log.Error(nil, "No server instances found in status response")
+		return "UNKNOWN", nil
+	}
+
+	status := response.GetServerInstanceListResponse.ServerInstanceList[0].ServerInstanceStatus
+	log.Info("Server status parsed", "status", status)
+	return status, nil
+}
+
+// parseServerStatusFallback JSON 파싱 실패 시 폴백 함수
+func (r *NCloudServerReconciler) parseServerStatusFallback(output []byte, log logr.Logger) (string, error) {
+	log.Info("Using fallback parsing for server status")
+
+	// 기존 문자열 매칭 방식
 	if strings.Contains(string(output), "RUN") {
 		return "RUN", nil
 	} else if strings.Contains(string(output), "CREATDT") {

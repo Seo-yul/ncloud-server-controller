@@ -1,0 +1,188 @@
+{{- if .Values.crds.install }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+    {{- with .Values.crds.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  name: ncloudservers.server.ncloud.devops.ai.kr
+  {{- with .Values.commonLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  group: server.ncloud.devops.ai.kr
+  names:
+    kind: NCloudServer
+    listKind: NCloudServerList
+    plural: ncloudservers
+    singular: ncloudserver
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: NCloudServer is the Schema for the ncloudservers API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NCloudServerSpec defines the desired state of NCloudServer.
+            properties:
+              accessControlGroupNoList:
+                items:
+                  type: string
+                type: array
+              associateWithPublicIp:
+                description: Public IP configuration
+                type: boolean
+              blockDevicePartitionList:
+                description: Partition configuration for Bare Metal
+                items:
+                  properties:
+                    mountPoint:
+                      type: string
+                    partitionSize:
+                      type: string
+                  type: object
+                type: array
+              credentials:
+                description: NCloud API credentials configuration
+                properties:
+                  secretRef:
+                    description: Reference to Kubernetes Secret containing credentials
+                    properties:
+                      name:
+                        description: Name of the Secret
+                        type: string
+                      accessKeyIDKey:
+                        description: Key name for access key ID in Secret
+                        default: accessKeyID
+                        type: string
+                      secretAccessKeyKey:
+                        description: Key name for secret access key in Secret
+                        default: secretAccessKey
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
+              initScriptNo:
+                description: Initialization script number
+                type: string
+              loginKeyName:
+                description: Login key name for server access
+                type: string
+              placementGroupNo:
+                description: Placement group number
+                type: string
+              raidTypeName:
+                description: RAID type name
+                type: string
+              serverImageProductCode:
+                description: Server image product code
+                type: string
+              serverProductCode:
+                description: Server product code
+                type: string
+              subnetNo:
+                description: Subnet number
+                type: string
+              userData:
+                description: User data script
+                type: string
+              vpcNo:
+                description: VPC number
+                type: string
+            required:
+            - vpcNo
+            - subnetNo
+            type: object
+          status:
+            description: NCloudServerStatus defines the observed state of NCloudServer.
+            properties:
+              conditions:
+                description: Current conditions of the NCloudServer
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              fabricClusterPoolNo:
+                description: Fabric cluster pool number
+                type: string
+              loginKeyName:
+                description: Login key name
+                type: string
+              message:
+                description: Status message
+                type: string
+              networkInterfaceNoList:
+                description: Network interface numbers
+                items:
+                  type: string
+                type: array
+              phase:
+                description: Current phase of the server
+                type: string
+              placementGroupName:
+                description: Placement group name
+                type: string
+              regionCode:
+                description: Region code
+                type: string
+              serverImageName:
+                description: Server image name
+                type: string
+              serverInstanceNo:
+                description: Server instance number
+                type: string
+              serverInstanceStatusName:
+                description: Server instance status name
+                type: string
+              serverInstanceType:
+                description: Server instance type
+                type: string
+              zoneCode:
+                description: Zone code
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}
