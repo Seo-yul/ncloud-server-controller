@@ -489,7 +489,7 @@ func (r *NCloudServerReconciler) createServer(ctx context.Context, server *serve
 
 	// 응답에서 서버 인스턴스 번호 추출
 	// 실제로는 JSON 파싱을 해야 하지만, 간단히 하기 위해 여기서는 성공 확인만
-	server.Status.ServerInstanceNo = "TEMPORARY_INSTANCE_NO" // 임시값
+	server.Status.ServerInstanceNo = tempInstanceNo // 임시값
 
 	return nil
 }
