@@ -1,23 +1,7 @@
 apiVersion: v2
 name: ncloud-server-controller
-description: A Kubernetes Operator for managing NCloud VPC servers
+description: A Helm chart for NCloud Server Controller Operator
 type: application
 version: 1.0.0
 appVersion: "1.0.0"
-home: https://github.com/Seo-yul/ncloud-server-controller
-sources:
-  - https://github.com/Seo-yul/ncloud-server-controller
-maintainers:
-  - name: Seo-yul
-    email: seoyul@example.com
-keywords:
-  - ncloud
-  - kubernetes
-  - operator
-  - vpc
-  - server
-  - controller
-annotations:
-  category: Infrastructure
-  # Chart icon
-  icon: https://raw.githubusercontent.com/Seo-yul/ncloud-server-controller/main/docs/icon.png
+icon: https://raw.githubusercontent.com/Seo-yul/ncloud-server-controller/main/docs/icon.png

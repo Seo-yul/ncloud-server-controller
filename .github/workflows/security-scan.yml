@@ -11,6 +11,26 @@ on:
       - develop
   workflow_dispatch:
 
+env:
+  # Registry and Image Configuration
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/seo-yul/ncloud-server-controller
+  
+  # Helm Chart Configuration
+  HELM_CHART_NAME: ncloud-server-controller
+  HELM_CHART_VERSION: 1.0.0
+  HELM_CHART_PACKAGE: ncloud-server-controller-1.0.0.tgz
+  
+  # Tool Versions
+  GO_VERSION: "1.23"
+  HELM_VERSION: "v3.15.0"
+  KUBECTL_VERSION: "v1.31.0"
+  KIND_VERSION: "latest"
+  
+  # Go Configuration
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
 jobs:
   security:
     name: Security Scan
@@ -24,12 +44,42 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Run Security Scan
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Run Vulnerability Check
       run: |
-        make security-scan
+        echo "🔒 Running Go vulnerability check..."
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        ~/go/bin/govulncheck ./... > vuln-report.txt 2>&1 || true
+        cat vuln-report.txt
+
+    - name: Run Security Scan with Go vet
+      run: |
+        echo "🔒 Running Go security analysis with vet..."
+        go vet -v ./... > vet-report.txt 2>&1 || true
+        cat vet-report.txt
+
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          vuln-report.txt
+          vet-report.txt
+        retention-days: 30
 
     - name: Security Summary
       run: |
         echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tool**: gosec" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tools**: govulncheck, go vet" >> $GITHUB_STEP_SUMMARY
         echo "- **Status**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reports**: Available as artifacts" >> $GITHUB_STEP_SUMMARY

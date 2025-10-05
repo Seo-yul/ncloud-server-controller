@@ -31,6 +31,12 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # ghcr.io/seo-yul/ncloud-server-controller-bundle:$VERSION and ghcr.io/seo-yul/ncloud-server-controller-catalog:$VERSION.
 IMAGE_TAG_BASE ?= ghcr.io/seo-yul/ncloud-server-controller
 
+# Helm Chart Configuration
+HELM_CHART_NAME ?= ncloud-server-controller
+HELM_CHART_VERSION ?= $(VERSION)
+HELM_REGISTRY ?= ghcr.io/seo-yul
+HELM_CHART_PACKAGE ?= $(HELM_CHART_NAME)-$(HELM_CHART_VERSION).tgz
+
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
@@ -60,10 +66,18 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
-# Be aware that the target commands are only tested with Docker which is
-# scaffolded by default. However, you might want to replace it to use other
-# tools. (i.e. podman)
+# Automatically detects Docker or Podman based on environment:
+# - GitHub Actions: Always use Docker
+# - Local development: Prefer Podman if available, fallback to Docker
+# - Manual override: Set CONTAINER_TOOL=docker or CONTAINER_TOOL=podman
+ifeq ($(GITHUB_ACTIONS),true)
 CONTAINER_TOOL ?= docker
+else
+CONTAINER_TOOL ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+endif
+
+# Container tool detection info
+CONTAINER_TOOL_INFO := $(shell echo "Using $(CONTAINER_TOOL) as container tool")
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -85,6 +99,24 @@ all: build
 # https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
 # More info on the awk command:
 # http://linuxcommand.org/lc3_adv_awk.php
+
+.PHONY: container-info
+container-info: ## Show container tool information
+	@echo "🐳 Container Tool Information"
+	@echo "============================"
+	@echo "Detected tool: $(CONTAINER_TOOL)"
+	@echo "GitHub Actions: $(GITHUB_ACTIONS)"
+	@echo ""
+	@echo "Available commands:"
+	@echo "  make docker-build     - Build single architecture image"
+	@echo "  make docker-buildx    - Build multi-architecture image"
+	@echo "  make podman-multiarch-build - Build multi-arch with Podman"
+	@echo "  make create-multiarch-manifest - Create multi-arch manifest"
+	@echo ""
+	@echo "Environment detection:"
+	@echo "  - GitHub Actions: Always uses Docker"
+	@echo "  - Local development: Prefers Podman if available, falls back to Docker"
+	@echo "  - Manual override: Set CONTAINER_TOOL=docker or CONTAINER_TOOL=podman"
 
 .PHONY: help
 help: ## Display this help.
@@ -109,7 +141,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet setup-envtest-local ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-coverage
@@ -141,7 +173,13 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
+	@echo "=== Building controller image for E2E testing ==="
+	@echo "Using container tool: $(CONTAINER_TOOL)"
+	$(CONTAINER_TOOL) build -t ncloud-server-controller:e2e-test .
+	@echo "=== Loading image into Kind cluster ==="
+	$(KIND) load docker-image ncloud-server-controller:e2e-test --name $(KIND_CLUSTER)
+	@echo "=== Running E2E tests ==="
+	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout=30m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: test-e2e-debug
@@ -177,17 +215,20 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 security-scan: ## Run security scan using gosec
 	@echo "Running security scan..."
 	@if command -v gosec >/dev/null 2>&1; then \
+		echo "✅ gosec found, running scan..."; \
 		gosec ./...; \
 	else \
-		echo "gosec not found. Installing gosec..."; \
-		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
-		gosec ./...; \
+		echo "⚠️ gosec not found. Installing gosec..."; \
+		GOPROXY=https://proxy.golang.org,direct go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+		if [ $$? -eq 0 ]; then \
+			echo "✅ gosec installed successfully"; \
+			$(GOBIN)/gosec ./...; \
+		else \
+			echo "❌ Failed to install gosec"; \
+			echo "💡 Trying alternative installation method..."; \
+			go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest || echo "❌ gosec installation failed"; \
+		fi; \
 	fi
-
-.PHONY: check-deps
-check-deps: ## Check for outdated dependencies
-	@echo "Checking for outdated dependencies..."
-	go list -u -m all
 
 ##@ Build
 
@@ -258,6 +299,19 @@ docker-push: ## Push docker image with the manager.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
+	@echo "🐳 Building multi-architecture image using $(CONTAINER_TOOL)..."
+	@echo "Platforms: $(PLATFORMS)"
+	@echo "Image: $(IMG)"
+	@if [ "$(CONTAINER_TOOL)" = "podman" ]; then \
+		echo "Using Podman for multi-arch build..."; \
+		$(MAKE) podman-multiarch-build PLATFORMS="$(PLATFORMS)" IMG="$(IMG)"; \
+	else \
+		echo "Using Docker Buildx for multi-arch build..."; \
+		$(MAKE) docker-buildx-native PLATFORMS="$(PLATFORMS)" IMG="$(IMG)"; \
+	fi
+
+.PHONY: docker-buildx-native
+docker-buildx-native: ## Native Docker Buildx implementation
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name ncloud-server-controller-builder
@@ -270,8 +324,9 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 PODMAN_MULTI_PLATFORMS ?= linux/amd64,linux/arm64
 
 .PHONY: podman-multiarch-build
-podman-multiarch-build: ## Build and push docker image for the manager for cross-platform support using podman
-	@echo "Building multi-architecture image with podman: ${IMG}"
+podman-multiarch-build: ## Build and push multi-arch image using Podman
+	@echo "🐳 Building multi-architecture image with Podman..."
+	@echo "Image: ${IMG}"
 	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
 	# Create manifest list
 	podman manifest create ${IMG}
@@ -305,38 +360,144 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
-.PHONY: helm-lint
-helm-lint: ## Lint Helm chart
-	helm lint helm/ncloud-server-controller
-
 .PHONY: helm-template
 helm-template: ## Template Helm chart
 	helm template test-release helm/ncloud-server-controller --dry-run
 
-.PHONY: helm-package
-helm-package: ## Package Helm chart
-	mkdir -p dist
-	helm package helm/ncloud-server-controller -d dist/
+##@ Release Management
 
-.PHONY: helm-install
-helm-install: helm-package ## Install Helm chart locally
-	helm install ncloud-server-controller dist/ncloud-server-controller-*.tgz
+.PHONY: release-info
+release-info: ## Show release information
+	@echo "📋 Release Information:"
+	@echo "  Version: $(VERSION)"
+	@echo "  Image: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  Helm Chart: $(HELM_CHART_PACKAGE)"
+	@echo "  Registry: $(HELM_REGISTRY)"
 
-.PHONY: helm-uninstall
-helm-uninstall: ## Uninstall Helm chart
-	helm uninstall ncloud-server-controller
-
-.PHONY: github-release
-github-release: ## Create GitHub release with assets
-	@echo "Creating GitHub release for version $(VERSION)..."
+.PHONY: release-check
+release-check: ## Check if release prerequisites are met
+	@echo "🔍 Checking release prerequisites..."
 	@if [ -z "$(GITHUB_TOKEN)" ]; then \
-		echo "Error: GITHUB_TOKEN environment variable is required"; \
+		echo "❌ GITHUB_TOKEN environment variable is required"; \
 		exit 1; \
 	fi
-	gh release create v$(VERSION) \
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "❌ GitHub CLI (gh) is required"; \
+		exit 1; \
+	fi
+	@if ! gh auth status >/dev/null 2>&1; then \
+		echo "❌ GitHub CLI authentication required"; \
+		exit 1; \
+	fi
+	@echo "✅ All prerequisites met"
+
+.PHONY: release-tag
+release-tag: release-check ## Create Git tag for release
+	@echo "🏷️ Creating Git tag v$(VERSION)..."
+	@if git tag -l | grep -q "^v$(VERSION)$$"; then \
+		echo "⚠️ Tag v$(VERSION) already exists"; \
+		echo "💡 To recreate, run: git tag -d v$(VERSION) && git push origin :refs/tags/v$(VERSION)"; \
+		exit 1; \
+	fi
+	@git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+	@git push origin "v$(VERSION)"
+	@echo "✅ Git tag v$(VERSION) created and pushed"
+
+.PHONY: release-image-tag
+release-image-tag: ## Tag existing image with release version
+	@echo "🐳 Tagging existing image with release version..."
+	@echo "Using container tool: $(CONTAINER_TOOL)"
+	@echo "Source: $(IMAGE_TAG_BASE):develop"
+	@echo "Target: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "Target: $(IMAGE_TAG_BASE):latest"
+	@echo "💡 Manual tagging commands:"
+	@echo "  $(CONTAINER_TOOL) pull $(IMAGE_TAG_BASE):develop"
+	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):latest"
+	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
+
+.PHONY: release-github
+release-github: release-check ## Create GitHub release
+	@echo "🚀 Creating GitHub release for version $(VERSION)..."
+	@if gh release view "v$(VERSION)" >/dev/null 2>&1; then \
+		echo "⚠️ Release v$(VERSION) already exists"; \
+		echo "💡 To recreate, run: gh release delete v$(VERSION)"; \
+		exit 1; \
+	fi
+	@echo "Creating release for tag v$(VERSION)..."
+	@gh release create "v$(VERSION)" \
 		--title "Release v$(VERSION)" \
-		--notes "NCloud Server Controller v$(VERSION)" \
-		dist/*.tgz || echo "Release may already exist"
+		--notes "Release v$(VERSION) of NCloud Server Controller
+
+	## 🚀 What's New
+	- NCloud Server Controller Operator v$(VERSION)
+	- Multi-architecture support (linux/amd64, linux/arm64)
+	- Helm chart included
+	
+	## 📦 Installation
+	\`\`\`bash
+	# Using Helm
+	helm install ncloud-server-controller oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version $(VERSION)
+	
+	# Using kubectl
+	kubectl apply -k https://github.com/seo-yul/ncloud-server-controller/config/default?ref=v$(VERSION)
+	\`\`\`
+	
+	## 🐳 Docker Images
+	- \`$(IMAGE_TAG_BASE):$(VERSION)\`
+- \`$(IMAGE_TAG_BASE):latest\`" \
+		--latest
+	@echo "✅ GitHub release created successfully"
+
+.PHONY: release-helm
+release-helm: helm-package ## Package Helm chart for release
+	@echo "📦 Packaging Helm chart for release..."
+	@echo "Chart: $(HELM_CHART_PACKAGE)"
+	@if [ -f "$(HELM_CHART_PACKAGE)" ]; then \
+		echo "✅ Helm chart packaged: $(HELM_CHART_PACKAGE)"; \
+	else \
+		echo "❌ Helm chart package not found"; \
+		exit 1; \
+	fi
+
+.PHONY: release-upload-assets
+release-upload-assets: release-helm ## Upload Helm chart to GitHub release
+	@echo "📤 Uploading Helm chart to GitHub release..."
+	@if ! gh release view "v$(VERSION)" >/dev/null 2>&1; then \
+		echo "❌ Release v$(VERSION) not found. Run 'make release-github' first"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(HELM_CHART_PACKAGE)" ]; then \
+		echo "❌ Helm chart package not found: $(HELM_CHART_PACKAGE)"; \
+		exit 1; \
+	fi
+	@gh release upload "v$(VERSION)" "$(HELM_CHART_PACKAGE)"
+	@echo "✅ Helm chart uploaded to release v$(VERSION)"
+
+.PHONY: release
+release: release-info release-check release-tag release-image-tag release-github release-upload-assets ## Complete release process
+	@echo "🎉 Release v$(VERSION) completed successfully!"
+	@echo ""
+	@echo "📋 Release Summary:"
+	@echo "  Version: $(VERSION)"
+	@echo "  Git Tag: v$(VERSION)"
+	@echo "  Image: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  Helm Chart: $(HELM_CHART_PACKAGE)"
+	@echo "  GitHub Release: https://github.com/seo-yul/ncloud-server-controller/releases/tag/v$(VERSION)"
+	@echo ""
+	@echo "💡 Next Steps:"
+	@echo "  1. Tag the Docker image: make release-image-tag"
+	@echo "  2. Push Docker images: $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):$(VERSION) && $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
+	@echo "  3. Test the release: helm install test-release oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version $(VERSION)"
+
+.PHONY: release-quick
+release-quick: release-check release-github release-upload-assets ## Quick release (skip Git tag creation)
+	@echo "⚡ Quick release v$(VERSION) completed!"
+	@echo "💡 Note: Git tag was not created. Run 'make release-tag' if needed."
+
+.PHONY: github-release
+github-release: release-github ## Alias for release-github (backward compatibility)
 
 .PHONY: clean
 clean: ## Clean build artifacts and temporary files
@@ -405,8 +566,8 @@ controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessar
 $(CONTROLLER_GEN): $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
-.PHONY: setup-envtest
-setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.
+.PHONY: setup-envtest-local
+setup-envtest-local: envtest ## Download the binaries required for ENVTEST in the local bin directory.
 	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
 	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path || { \
 		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION)."; \
@@ -523,7 +684,7 @@ ci-test: test test-coverage ## Complete CI test pipeline
 	@echo "CI test pipeline completed successfully"
 
 .PHONY: ci-release
-ci-release: ci-build helm-package github-release ## Complete CI release pipeline
+ci-release: ci-build helm-all release-github release-upload-assets ## Complete CI release pipeline
 	@echo "CI release pipeline completed successfully"
 
 .PHONY: pre-commit
@@ -531,15 +692,35 @@ pre-commit: fmt vet lint test ## Run pre-commit checks
 	@echo "Pre-commit checks completed successfully"
 
 .PHONY: all-checks
-all-checks: pre-commit security-scan check-deps ## Run all quality checks
+all-checks: pre-commit security-scan ## Run all quality checks
 	@echo "All quality checks completed successfully"
 
 ##@ Local Testing Pipeline
 
+.PHONY: setup-envtest
+setup-envtest: ## Setup envtest binaries for CI/CD
+	@echo "🔧 Setting up envtest binaries..."
+	@mkdir -p $${HOME:-/home/runner}/kubebuilder/bin
+	@if command -v setup-envtest >/dev/null 2>&1; then \
+		echo "✅ setup-envtest found, installing binaries..."; \
+		setup-envtest use 1.29.0 --bin-dir $${HOME:-/home/runner}/kubebuilder/bin; \
+		echo "✅ envtest binaries installed in $${HOME:-/home/runner}/kubebuilder/bin"; \
+	else \
+		echo "⚠️ setup-envtest not found, installing..."; \
+		go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; \
+		echo "✅ setup-envtest installed, now installing binaries..."; \
+		setup-envtest use 1.29.0 --bin-dir $${HOME:-/home/runner}/kubebuilder/bin; \
+		echo "✅ envtest binaries installed in $${HOME:-/home/runner}/kubebuilder/bin"; \
+	fi
+	@echo "🔍 Verifying installation..."
+	@ls -la $${HOME:-/home/runner}/kubebuilder/bin/ || echo "Directory not found"
+	@find $${HOME:-/home/runner}/kubebuilder/bin -name "etcd" -type f 2>/dev/null || echo "etcd not found"
+
 .PHONY: test-unit
 test-unit: ## Run unit tests only
 	@echo "🧪 Running unit tests..."
-	go test -short ./internal/... ./api/... -v
+	@echo "KUBEBUILDER_ASSETS: $(KUBEBUILDER_ASSETS)"
+	go test -short ./internal/controller/... -v
 
 .PHONY: test-integration
 test-integration: ## Run integration tests
@@ -662,3 +843,265 @@ version-check: ## Check version consistency across files
 	@echo "Helm Chart version: $$(grep '^version:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
 	@echo "Helm Chart appVersion: $$(grep '^appVersion:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
 	@echo "Latest git tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags found')"
+
+.PHONY: docker-build-simple
+docker-build-simple: ## Simple multi-arch build using Docker Buildx
+	@echo "🐳 Building multi-architecture image with Docker Buildx..."
+	@echo "Image: ${IMG}"
+	@echo "Platforms: linux/amd64,linux/arm64"
+	docker buildx build --platform linux/amd64,linux/arm64 --push --tag ${IMG} .
+	@echo "✅ Multi-architecture image built and pushed successfully!"
+
+.PHONY: podman-build-simple
+podman-build-simple: ## Simple multi-arch build using Podman
+	@echo "🐳 Building multi-architecture image with Podman..."
+	@echo "Image: ${IMG}"
+	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
+	podman build --platform $(PODMAN_MULTI_PLATFORMS) --tag ${IMG} .
+	podman push ${IMG}
+	@echo "✅ Multi-architecture image built and pushed successfully!"
+
+##@ Container Registry Management
+
+.PHONY: cleanup-manifests
+cleanup-manifests: ## Clean up existing manifests from GHCR using API
+	@echo "🧹 Cleaning up existing manifests from GHCR..."
+	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+		echo "❌ GITHUB_TOKEN environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "📦 Package name: $(shell echo $(IMG) | cut -d: -f1 | sed 's|.*/||')"
+	@echo "🏷️  Tags to clean: $(TAGS)"
+	@echo "🔧 Processing tags for cleanup..."
+	@for tag in $(TAGS); do \
+		if [ -n "$$tag" ]; then \
+			tag_name="$${tag##*:}"; \
+			echo "🗑️  Cleaning up tag: $$tag_name"; \
+			gh api DELETE "/user/packages/container/$(shell echo $(IMG) | cut -d: -f1 | sed 's|.*/||')" \
+				-H "Accept: application/vnd.github+json" \
+				-H "X-GitHub-Api-Version: 2022-11-28" \
+				--silent || echo "⚠️  Failed to delete package or package not found"; \
+		fi; \
+	done
+	@echo "⏳ Waiting for GHCR cleanup to complete..."
+	@sleep 30
+	@echo "✅ GHCR cleanup completed"
+
+.PHONY: create-multiarch-manifest
+create-multiarch-manifest: ## Create and push multi-arch manifest using appropriate container tool
+	@echo "🐳 Creating multi-architecture manifest using $(CONTAINER_TOOL)..."
+	@if [ -z "$(TAGS)" ]; then \
+		echo "❌ TAGS environment variable is required"; \
+		exit 1; \
+	fi
+	@echo "🏷️  Available tags: $(TAGS)"
+	@echo "🔧 Processing tags..."
+	@if [ "$(CONTAINER_TOOL)" = "podman" ]; then \
+		$(MAKE) create-multiarch-manifest-podman TAGS="$(TAGS)"; \
+	else \
+		$(MAKE) create-multiarch-manifest-docker TAGS="$(TAGS)"; \
+	fi
+
+.PHONY: create-multiarch-manifest-docker
+create-multiarch-manifest-docker: ## Create and push multi-arch manifest using Docker CLI
+	@echo "🐳 Creating multi-architecture manifest using Docker..."
+	@for tag in $(TAGS); do \
+		if [ -n "$$tag" ]; then \
+			echo "🔨 Creating manifest for $$tag"; \
+			tag_name="$${tag##*:}"; \
+			echo "📝 Tag name: $$tag_name"; \
+			base_image="$(shell echo $(IMG) | cut -d: -f1)"; \
+			\
+			# Remove existing manifest if it exists \
+			echo "🧹 Cleaning up existing manifest for $$tag..."; \
+			docker manifest rm "$$tag" 2>/dev/null || true; \
+			\
+			# Also remove architecture-specific manifests that might exist \
+			docker manifest rm "$$base_image:$${tag_name}-amd64" 2>/dev/null || true; \
+			docker manifest rm "$$base_image:$${tag_name}-arm64" 2>/dev/null || true; \
+			\
+			# Wait for cleanup to complete \
+			sleep 5; \
+			\
+			# Create new manifest with architecture-specific tags \
+			echo "🔨 Creating new manifest for $$tag"; \
+			echo "📦 AMD64 image: $$base_image:$${tag_name}-amd64"; \
+			echo "📦 ARM64 image: $$base_image:$${tag_name}-arm64"; \
+			\
+			# Check if architecture-specific images exist and are not manifest lists \
+			echo "🔍 Checking AMD64 image..."; \
+			if docker manifest inspect "$$base_image:$${tag_name}-amd64" >/dev/null 2>&1; then \
+				echo "⚠️  AMD64 image exists as manifest list, skipping manifest creation"; \
+				echo "✅ Multi-arch manifest already exists for $$tag"; \
+			else \
+				docker manifest create "$$tag" \
+					"$$base_image:$${tag_name}-amd64" \
+					"$$base_image:$${tag_name}-arm64"; \
+				\
+				# Annotate AMD64 image \
+				docker manifest annotate "$$tag" \
+					"$$base_image:$${tag_name}-amd64" \
+					--os linux --arch amd64; \
+				\
+				# Annotate ARM64 image \
+				docker manifest annotate "$$tag" \
+					"$$base_image:$${tag_name}-arm64" \
+					--os linux --arch arm64; \
+				\
+				# Push manifest \
+				docker manifest push "$$tag"; \
+				echo "✅ Multi-arch manifest created and pushed for $$tag"; \
+			fi; \
+		fi; \
+	done
+	@echo "🎉 Multi-architecture manifest creation completed!"
+
+.PHONY: create-multiarch-manifest-podman
+create-multiarch-manifest-podman: ## Create and push multi-arch manifest using Podman
+	@echo "🐳 Creating multi-architecture manifest using Podman..."
+	@for tag in $(TAGS); do \
+		if [ -n "$$tag" ]; then \
+			echo "🔨 Creating manifest for $$tag"; \
+			tag_name="$${tag##*:}"; \
+			echo "📝 Tag name: $$tag_name"; \
+			base_image="$(shell echo $(IMG) | cut -d: -f1)"; \
+			\
+			# Remove existing manifest if it exists \
+			echo "🧹 Cleaning up existing manifest for $$tag..."; \
+			podman manifest rm "$$tag" 2>/dev/null || true; \
+			\
+			# Wait for cleanup to complete \
+			sleep 3; \
+			\
+			# Create new manifest with architecture-specific tags \
+			echo "🔨 Creating new manifest for $$tag"; \
+			echo "📦 AMD64 image: $$base_image:$${tag_name}-amd64"; \
+			echo "📦 ARM64 image: $$base_image:$${tag_name}-arm64"; \
+			podman manifest create "$$tag"; \
+			podman manifest add "$$tag" "docker://$$base_image:$${tag_name}-amd64"; \
+			podman manifest add "$$tag" "docker://$$base_image:$${tag_name}-arm64"; \
+			\
+			# Push manifest \
+			podman manifest push "$$tag" "docker://$$tag"; \
+			\
+			echo "✅ Manifest created and pushed for $$tag"; \
+		fi; \
+	done
+	@echo "🎉 Multi-architecture manifest creation completed!"
+
+.PHONY: multiarch-build-and-push
+multiarch-build-and-push: cleanup-manifests create-multiarch-manifest ## Complete multi-arch build pipeline with cleanup
+	@echo "🚀 Multi-architecture build and push pipeline completed!"
+
+##@ Helm Chart Management
+
+.PHONY: helm-generate
+helm-generate: ## Generate Helm chart from current kustomize resources (CRD only)
+	@echo "🔧 Generating Helm chart from kustomize resources..."
+	mkdir -p helm/ncloud-server-controller/templates
+	# Generate CRDs (make install과 동일)
+	# Copy NCloudServer CRD directly from source
+	cp config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml helm/ncloud-server-controller/templates/ncloudserver-crd.yaml
+	# Update Chart.yaml with Helm chart version (separate from image version)
+	@echo "📝 Updating Chart.yaml with Helm chart version $(HELM_CHART_VERSION)..."
+	@echo "apiVersion: v2" > helm/ncloud-server-controller/Chart.yaml
+	@echo "name: $(HELM_CHART_NAME)" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "description: A Helm chart for NCloud Server Controller Operator" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "type: application" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "version: $(HELM_CHART_VERSION)" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "appVersion: \"$(VERSION)\"" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "icon: https://raw.githubusercontent.com/Seo-yul/ncloud-server-controller/main/docs/icon.png" >> helm/ncloud-server-controller/Chart.yaml
+	@echo "✅ Helm chart generated successfully with Helm chart version $(HELM_CHART_VERSION) and app version $(VERSION)"
+	@echo "⚠️  Note: Individual templates are manually maintained and not overwritten"
+
+.PHONY: helm-package
+helm-package: helm-generate ## Package the operator as a Helm chart
+	@echo "📦 Packaging Helm chart..."
+	helm package helm/ncloud-server-controller/
+	@echo "✅ Helm chart packaged as $(HELM_CHART_PACKAGE)"
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart
+	@echo "🔍 Linting Helm chart..."
+	helm lint helm/ncloud-server-controller/
+	@echo "✅ Helm chart linting completed"
+
+.PHONY: helm-push
+helm-push: helm-package ## Push Helm chart to OCI registry
+	@echo "🚀 Pushing Helm chart to OCI registry..."
+	@if helm push $(HELM_CHART_PACKAGE) oci://$(HELM_REGISTRY); then \
+		echo "✅ Helm chart pushed to $(HELM_REGISTRY)/$(HELM_CHART_NAME):$(HELM_CHART_VERSION)"; \
+	else \
+		echo "⚠️  Failed to push to OCI registry. Chart packaged locally: $(HELM_CHART_PACKAGE)"; \
+		echo "💡 You can manually push with: helm push $(HELM_CHART_PACKAGE) oci://$(HELM_REGISTRY)"; \
+		exit 1; \
+	fi
+
+.PHONY: helm-dry-run
+helm-dry-run: ## Dry run Helm installation
+	@echo "🧪 Dry run Helm installation..."
+	helm install ncloud-server-controller helm/ncloud-server-controller/ --dry-run --debug \
+		--set image.repository=$(shell echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$(shell echo $(IMG) | cut -d: -f2) \
+		--namespace ncloud-system --create-namespace
+
+.PHONY: helm-install
+helm-install: ## Install the operator using Helm
+	@echo "📋 Installing NCloud Server Controller using Helm..."
+	helm install ncloud-server-controller helm/ncloud-server-controller/ \
+		--set image.repository=$(shell echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$(shell echo $(IMG) | cut -d: -f2) \
+		--namespace ncloud-system --create-namespace
+	@echo "✅ NCloud Server Controller installed successfully"
+
+.PHONY: helm-install-from-registry
+helm-install-from-registry: ## Install the operator using Helm chart from OCI registry
+	@echo "📋 Installing NCloud Server Controller from OCI registry..."
+	helm install ncloud-server-controller oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) \
+		--version $(HELM_CHART_VERSION) \
+		--set image.repository=$(shell echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$(shell echo $(IMG) | cut -d: -f2) \
+		--namespace ncloud-system --create-namespace
+	@echo "✅ NCloud Server Controller installed from registry"
+
+.PHONY: helm-install-with-values
+helm-install-with-values: ## Install the operator using Helm chart from OCI registry with local values
+	@echo "📋 Installing NCloud Server Controller with custom values..."
+	helm install ncloud-server-controller oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) \
+		--version $(HELM_CHART_VERSION) \
+		-f helm/ncloud-server-controller/values.yaml \
+		--set image.repository=$(shell echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$(shell echo $(IMG) | cut -d: -f2) \
+		--namespace ncloud-system --create-namespace
+	@echo "✅ NCloud Server Controller installed with custom values"
+
+.PHONY: helm-upgrade
+helm-upgrade: ## Upgrade the operator using Helm
+	@echo "🔄 Upgrading NCloud Server Controller using Helm..."
+	helm upgrade ncloud-server-controller helm/ncloud-server-controller/ \
+		--set image.repository=$(shell echo $(IMG) | cut -d: -f1) \
+		--set image.tag=$(shell echo $(IMG) | cut -d: -f2) \
+		--namespace ncloud-system
+	@echo "✅ NCloud Server Controller upgraded successfully"
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the operator using Helm
+	@echo "🗑️ Uninstalling NCloud Server Controller using Helm..."
+	helm uninstall ncloud-server-controller --namespace ncloud-system
+	@echo "✅ NCloud Server Controller uninstalled successfully"
+
+.PHONY: helm-clean
+helm-clean: ## Clean up generated Helm chart package
+	@echo "🧹 Cleaning up Helm chart package..."
+	rm -f $(HELM_CHART_PACKAGE)
+	@echo "✅ Helm chart package cleaned up"
+
+.PHONY: helm-all
+helm-all: helm-generate helm-package helm-lint ## Run all Helm operations (generate, package, lint)
+	@echo "🎉 All Helm operations completed successfully!"
+	@echo "📦 Chart packaged as: $(HELM_CHART_PACKAGE)"
+	@echo "💡 To push to registry: make helm-push"
+
+.PHONY: helm-all-with-push
+helm-all-with-push: helm-generate helm-package helm-lint helm-push ## Run all Helm operations including push
+	@echo "🎉 All Helm operations including push completed successfully!"

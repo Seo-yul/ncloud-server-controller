@@ -101,6 +101,13 @@ var _ = AfterSuite(func() {
 // setting the 'KUBEBUILDER_ASSETS' environment variable. To ensure the binaries are
 // properly set up, run 'make setup-envtest' beforehand.
 func getFirstFoundEnvTestBinaryDir() string {
+	// First check if KUBEBUILDER_ASSETS is set (for CI/CD environments)
+	if assetsPath := os.Getenv("KUBEBUILDER_ASSETS"); assetsPath != "" {
+		logf.Log.Info("Using KUBEBUILDER_ASSETS", "path", assetsPath)
+		return assetsPath
+	}
+
+	// Fallback to local development path
 	basePath := filepath.Join("..", "..", "bin", "k8s")
 	entries, err := os.ReadDir(basePath)
 	if err != nil {

@@ -12,8 +12,12 @@ on:
   workflow_dispatch:
 
 env:
+  # Registry and Image Configuration
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/seo-yul/ncloud-server-controller
+  
+  # Tool Versions
+  GO_VERSION: "1.23"
 
 jobs:
   build:
@@ -38,13 +42,75 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
 
+    - name: Setup envtest
+      run: |
+        echo "🔧 Setting up envtest binaries..."
+        mkdir -p $HOME/kubebuilder/bin
+        if command -v setup-envtest >/dev/null 2>&1; then
+          echo "✅ setup-envtest found, installing binaries..."
+          setup-envtest use 1.29.0 --bin-dir $HOME/kubebuilder/bin
+          echo "✅ envtest binaries installed in $HOME/kubebuilder/bin"
+        else
+          echo "⚠️ setup-envtest not found, installing..."
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          echo "✅ setup-envtest installed, now installing binaries..."
+          setup-envtest use 1.29.0 --bin-dir $HOME/kubebuilder/bin
+          echo "✅ envtest binaries installed in $HOME/kubebuilder/bin"
+        fi
+        echo "🔍 Verifying installation..."
+        ls -la $HOME/kubebuilder/bin/ || echo "Directory not found"
+        find $HOME/kubebuilder/bin -name "etcd" -type f 2>/dev/null || echo "etcd not found"
+        # Set KUBEBUILDER_ASSETS to the actual binary directory path
+        echo "KUBEBUILDER_ASSETS=$HOME/kubebuilder/bin/k8s/1.29.0-linux-amd64" >> $GITHUB_ENV
+
     - name: Build
       run: |
-        make build
+        echo "🔨 Building Go application..."
+        echo "Go version: $(go version)"
+        echo "Working directory: $(pwd)"
+        
+        # Run build with detailed error reporting
+        if ! make build; then
+          echo "❌ Build failed!"
+          echo "🔍 Debugging information:"
+          echo "Go environment:"
+          go env | grep -E "(GOROOT|GOPATH|GOCACHE|GOOS|GOARCH)" || echo "Failed to get Go environment"
+          echo "Go modules:"
+          go mod verify || echo "Go modules verification failed"
+          echo "Available Go files:"
+          find . -name "*.go" -type f | head -10 || echo "No Go files found"
+          exit 1
+        fi
+        echo "✅ Build completed successfully!"
 
-    - name: Test
+    - name: Test (Unit only)
       run: |
-        make test-unit
+        echo "🧪 Running unit tests..."
+        echo "KUBEBUILDER_ASSETS: $KUBEBUILDER_ASSETS"
+        echo "Go version: $(go version)"
+        echo "Working directory: $(pwd)"
+        
+        # Verify envtest binaries exist
+        if [ -n "$KUBEBUILDER_ASSETS" ]; then
+          echo "🔍 Verifying envtest binaries..."
+          ls -la "$KUBEBUILDER_ASSETS" || echo "KUBEBUILDER_ASSETS directory not found"
+          find "$KUBEBUILDER_ASSETS" -name "etcd" -type f 2>/dev/null || echo "etcd binary not found"
+          find "$KUBEBUILDER_ASSETS" -name "kube-apiserver" -type f 2>/dev/null || echo "kube-apiserver binary not found"
+        else
+          echo "⚠️ KUBEBUILDER_ASSETS not set, using default discovery"
+        fi
+        
+        # Run tests with detailed error reporting
+        if ! go test -short ./internal/controller/... -v; then
+          echo "❌ Unit tests failed!"
+          echo "🔍 Debugging information:"
+          echo "Go environment:"
+          go env | grep -E "(GOROOT|GOPATH|GOCACHE|GOOS|GOARCH)" || echo "Failed to get Go environment"
+          echo "Available test packages:"
+          go list ./internal/controller/... || echo "Failed to list test packages"
+          exit 1
+        fi
+        echo "✅ Unit tests passed!"
 
     - name: Build Summary
       run: |
@@ -53,8 +119,8 @@ jobs:
         echo "- **Build**: ✅ Success" >> $GITHUB_STEP_SUMMARY
         echo "- **Tests**: ✅ Passed" >> $GITHUB_STEP_SUMMARY
 
-  build-image:
-    name: Build Multi-arch Image
+  build-amd64:
+    name: Build AMD64 Image
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
@@ -73,7 +139,7 @@ jobs:
         password: ${{ secrets.NCLOUD_SERVER_CONTROLLER_REPO }}
 
     - name: Extract metadata
-      id: meta
+      id: meta-amd64
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.IMAGE_NAME }}
@@ -82,21 +148,172 @@ jobs:
           type=ref,event=pr
           type=sha,prefix={{branch}}-
 
-    - name: Build and push
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Image Summary
+    - name: Build and push AMD64 image
       run: |
-        echo "## 🐳 Image Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "🐳 Building AMD64 image..."
+        
+        # Extract the first tag from the multi-line output
+        FIRST_TAG=$(echo "${{ steps.meta-amd64.outputs.tags }}" | head -n1)
+        AMD64_TAG="${FIRST_TAG}-amd64"
+        
+        echo "Original tags: ${{ steps.meta-amd64.outputs.tags }}"
+        echo "First tag: $FIRST_TAG"
+        echo "AMD64 tag: $AMD64_TAG"
+        echo "Platform: linux/amd64"
+        
+        # Build AMD64 image using Makefile with architecture-specific tag
+        if ! make docker-buildx PLATFORMS=linux/amd64 IMG="$AMD64_TAG"; then
+          echo "❌ AMD64 build failed!"
+          echo "🔍 Debugging information:"
+          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
+          echo "Docker version: $(docker --version)"
+          echo "Docker buildx version: $(docker buildx version)"
+          echo "Available buildx builders:"
+          docker buildx ls || echo "Failed to list builders"
+          echo "Makefile docker-buildx target failed with IMG=$AMD64_TAG"
+          exit 1
+        fi
+        echo "✅ AMD64 build completed successfully!"
+
+    - name: AMD64 Build Summary
+      run: |
+        FIRST_TAG=$(echo "${{ steps.meta-amd64.outputs.tags }}" | head -n1)
+        AMD64_TAG="${FIRST_TAG}-amd64"
+        echo "## 🐳 AMD64 Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: $AMD64_TAG" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+  build-arm64:
+    name: Build ARM64 Image
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.NCLOUD_SERVER_CONTROLLER_REPO }}
+
+    - name: Extract metadata
+      id: meta-arm64
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+
+    - name: Build and push ARM64 image
+      run: |
+        echo "🐳 Building ARM64 image..."
+        
+        # Extract the first tag from the multi-line output
+        FIRST_TAG=$(echo "${{ steps.meta-arm64.outputs.tags }}" | head -n1)
+        ARM64_TAG="${FIRST_TAG}-arm64"
+        
+        echo "Original tags: ${{ steps.meta-arm64.outputs.tags }}"
+        echo "First tag: $FIRST_TAG"
+        echo "ARM64 tag: $ARM64_TAG"
+        echo "Platform: linux/arm64"
+        
+        # Build ARM64 image using Makefile with architecture-specific tag
+        if ! make docker-buildx PLATFORMS=linux/arm64 IMG="$ARM64_TAG"; then
+          echo "❌ ARM64 build failed!"
+          echo "🔍 Debugging information:"
+          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
+          echo "Docker version: $(docker --version)"
+          echo "Docker buildx version: $(docker buildx version)"
+          echo "Available buildx builders:"
+          docker buildx ls || echo "Failed to list builders"
+          echo "Makefile docker-buildx target failed with IMG=$ARM64_TAG"
+          exit 1
+        fi
+        echo "✅ ARM64 build completed successfully!"
+
+    - name: ARM64 Build Summary
+      run: |
+        FIRST_TAG=$(echo "${{ steps.meta-arm64.outputs.tags }}" | head -n1)
+        ARM64_TAG="${FIRST_TAG}-arm64"
+        echo "## 🐳 ARM64 Build Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform**: linux/arm64" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: $ARM64_TAG" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+  create-manifest:
+    name: Create Multi-arch Manifest
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.NCLOUD_SERVER_CONTROLLER_REPO }}
+
+    - name: Extract metadata
+      id: meta-manifest
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+
+    - name: Create and push multi-arch manifest
+      run: |
+        echo "🐳 Creating multi-architecture manifest..."
+        
+        # Extract the first tag from the multi-line output
+        FIRST_TAG=$(echo "${{ steps.meta-manifest.outputs.tags }}" | head -n1)
+        
+        echo "Original tags: ${{ steps.meta-manifest.outputs.tags }}"
+        echo "First tag: $FIRST_TAG"
+        echo "Base image: ${{ env.IMAGE_NAME }}"
+        
+        # Create multi-arch manifest using Makefile
+        if ! make create-multiarch-manifest TAGS="$FIRST_TAG"; then
+          echo "❌ Multi-arch manifest creation failed!"
+          echo "🔍 Debugging information:"
+          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
+          echo "Docker version: $(docker --version)"
+          echo "Docker manifest version: $(docker manifest --version || echo 'manifest command not available')"
+          echo "Available images in registry:"
+          docker images | grep "${{ env.IMAGE_NAME }}" || echo "No local images found"
+          echo "Makefile create-multiarch-manifest target failed with TAGS=$FIRST_TAG"
+          exit 1
+        fi
+        echo "✅ Multi-arch manifest created successfully!"
+
+    - name: Multi-arch Manifest Summary
+      run: |
+        FIRST_TAG=$(echo "${{ steps.meta-manifest.outputs.tags }}" | head -n1)
+        echo "## 🎉 Multi-arch Manifest Results" >> $GITHUB_STEP_SUMMARY
         echo "- **Registry**: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Image**: ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tags**: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tags**: $FIRST_TAG" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Strategy**: Parallel Multi-runner Build" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Available Images" >> $GITHUB_STEP_SUMMARY
+        echo "- **Multi-arch**: \`$FIRST_TAG\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **AMD64**: \`${FIRST_TAG}-amd64\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **ARM64**: \`${FIRST_TAG}-arm64\`" >> $GITHUB_STEP_SUMMARY

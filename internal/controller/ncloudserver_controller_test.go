@@ -363,5 +363,5 @@ var _ = Describe("NCloudServer Controller", func() {
 // Test helper functions
 func TestNCloudServerReconciler(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "NCloudServer Controller Suite")
+	// RunSpecs is called in suite_test.go, no need to call it here
 }

@@ -11,6 +11,23 @@ on:
       - develop
   workflow_dispatch:
 
+env:
+  # Registry and Image Configuration
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/seo-yul/ncloud-server-controller
+  
+  # Helm Chart Configuration
+  HELM_CHART_NAME: ncloud-server-controller
+  HELM_CHART_VERSION: 1.0.0
+  HELM_CHART_PACKAGE: ncloud-server-controller-1.0.0.tgz
+  
+  
+  # Tool Versions
+  GO_VERSION: "1.23"
+  HELM_VERSION: "v3.15.0"
+  KUBECTL_VERSION: "v1.31.0"
+  KIND_VERSION: "latest"
+
 jobs:
   e2e:
     name: E2E Tests
@@ -52,7 +69,75 @@ jobs:
 
     - name: Run E2E Tests
       run: |
-        make test-e2e
+        # Create Kind cluster for E2E testing
+        echo "=== Creating Kind cluster for E2E testing ==="
+        kind create cluster --name ncloud-server-controller-test-e2e --wait 300s
+        
+        # Build the controller image for E2E testing
+        echo "=== Building controller image for E2E testing ==="
+        docker build -t ncloud-server-controller:e2e-test .
+        
+        # Load the image into Kind cluster
+        echo "=== Loading image into Kind cluster ==="
+        kind load docker-image ncloud-server-controller:e2e-test --name ncloud-server-controller-test-e2e
+        
+        # Run E2E tests with additional debugging
+        echo "=== Running E2E tests ==="
+        KIND_CLUSTER=ncloud-server-controller-test-e2e go test ./test/e2e/ -v -ginkgo.v -timeout=30m
+        
+        # Collect debugging information if tests fail
+        if [ $? -ne 0 ]; then
+          echo "=== E2E tests failed, collecting debugging information ==="
+          
+          # Check Kind cluster status
+          echo "=== Kind cluster status ==="
+          kind get clusters
+          kubectl cluster-info --context kind-ncloud-server-controller-test-e2e
+          
+          # Check loaded images
+          echo "=== Loaded images ==="
+          docker exec kind-ncloud-server-controller-test-e2e-control-plane crictl images | grep ncloud-server-controller || echo "No ncloud-server-controller images found"
+          
+          # Check all pods
+          echo "=== All pods ==="
+          kubectl get pods --all-namespaces
+          
+          # Check deployments
+          echo "=== Deployments ==="
+          kubectl get deployments --all-namespaces
+          
+          # Check services
+          echo "=== Services ==="
+          kubectl get services --all-namespaces
+          
+          # Check events
+          echo "=== Events ==="
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp'
+          
+          # Check controller logs
+          echo "=== Controller logs ==="
+          kubectl logs -n ncloud-system deployment/ncloud-server-controller-manager --tail=100 || echo "Failed to get controller logs"
+          
+          # Check metrics service specifically
+          echo "=== Metrics service details ==="
+          kubectl describe service ncloud-server-controller-manager-metrics-service -n ncloud-system || echo "Metrics service not found"
+          
+          # Check metrics endpoints
+          echo "=== Metrics endpoints ==="
+          kubectl get endpoints -n ncloud-system | grep metrics || echo "No metrics endpoints found"
+          
+          # Check if metrics port is exposed
+          echo "=== Checking if metrics port is accessible ==="
+          kubectl port-forward -n ncloud-system service/ncloud-server-controller-manager-metrics-service 8443:8443 &
+          PORT_FORWARD_PID=$!
+          sleep 5
+          curl -k https://localhost:8443/metrics || echo "Failed to access metrics endpoint"
+          kill $PORT_FORWARD_PID 2>/dev/null || true
+        fi
+        
+        # Clean up Kind cluster
+        echo "=== Cleaning up Kind cluster ==="
+        kind delete cluster --name ncloud-server-controller-test-e2e
 
     - name: E2E Summary
       run: |

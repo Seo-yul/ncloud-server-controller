@@ -1,0 +1,315 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: ncloudservers.server.ncloud.devops.ai.kr
+spec:
+  group: server.ncloud.devops.ai.kr
+  names:
+    kind: NCloudServer
+    listKind: NCloudServerList
+    plural: ncloudservers
+    singular: ncloudserver
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: NCloudServer is the Schema for the ncloudservers API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NCloudServerSpec defines the desired state of NCloudServer.
+            properties:
+              accessControlGroupNoList:
+                items:
+                  type: string
+                type: array
+              associateWithPublicIp:
+                description: Public IP configuration
+                type: boolean
+              blockDevicePartitionList:
+                description: Partition configuration for Bare Metal
+                items:
+                  description: BlockDevicePartition defines partition settings for
+                    Bare Metal
+                  properties:
+                    mountPoint:
+                      type: string
+                    partitionSize:
+                      type: string
+                  required:
+                  - mountPoint
+                  - partitionSize
+                  type: object
+                type: array
+              blockStorageMappingList:
+                description: Additional storage configuration
+                items:
+                  description: BlockStorageMapping defines additional storage configuration
+                  properties:
+                    blockStorageName:
+                      type: string
+                    blockStorageSize:
+                      type: string
+                    blockStorageVolumeTypeCode:
+                      type: string
+                    emptyBlockStorage:
+                      type: boolean
+                    encrypted:
+                      type: boolean
+                    noBlockStorage:
+                      type: boolean
+                    order:
+                      type: integer
+                    snapshotInstanceNo:
+                      type: string
+                  type: object
+                type: array
+              credentials:
+                description: NCloud authentication configuration
+                properties:
+                  secretRef:
+                    description: Secret reference containing NCloud credentials
+                    properties:
+                      accessKeyIDKey:
+                        description: Key within the secret containing access key ID
+                          (defaults to 'access-key-id')
+                        type: string
+                      name:
+                        description: Name of the secret
+                        type: string
+                      namespace:
+                        description: Namespace of the secret (defaults to same namespace
+                          as NCloudServer)
+                        type: string
+                      secretAccessKeyKey:
+                        description: Key within the secret containing secret訪問키 (defaults
+                          to 'secret-access-key')
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
+              debugMode:
+                description: Kubernetes specific annotations for debugging
+                type: boolean
+              fabricClusterPoolNo:
+                description: GPU configuration
+                type: string
+              feeSystemTypeCode:
+                description: Billing configuration
+                type: string
+              initScriptNo:
+                type: string
+              isEncryptedBaseBlockStorageVolume:
+                description: Storage configuration
+                type: boolean
+              isPreInstallGpuDriver:
+                type: boolean
+              isProtectServerTermination:
+                type: boolean
+              loginKeyName:
+                description: Security configuration
+                type: string
+              memberServerImageInstanceNo:
+                type: string
+              networkInterfaceList:
+                items:
+                  description: NetworkInterfaceConfiguration defines network interface
+                    settings
+                  properties:
+                    accessControlGroupNoList:
+                      items:
+                        type: string
+                      type: array
+                    ip:
+                      type: string
+                    networkInterfaceNo:
+                      type: string
+                    networkInterfaceOrder:
+                      type: integer
+                    subnetNo:
+                      type: string
+                  required:
+                  - networkInterfaceOrder
+                  type: object
+                type: array
+              placementGroupNo:
+                description: Advanced configuration
+                type: string
+              raidTypeName:
+                description: Bare Metal specific
+                type: string
+              regionCode:
+                description: Region code where the server will be created
+                type: string
+              serverCreateCount:
+                description: Scaling configuration
+                type: integer
+              serverCreateStartNo:
+                type: integer
+              serverDescription:
+                type: string
+              serverImageNo:
+                type: string
+              serverImageProductCode:
+                description: |-
+                  Server image configuration
+                  Exactly one of these must be specified
+                type: string
+              serverName:
+                description: Server naming and description
+                type: string
+              serverProductCode:
+                description: Server specification
+                type: string
+              serverSpecCode:
+                type: string
+              subnetNo:
+                type: string
+              vpcNo:
+                description: VPC configuration (Required for VPC environment)
+                type: string
+            required:
+            - subnetNo
+            - vpcNo
+            type: object
+          status:
+            description: NCloudServerStatus defines the observed state of NCloudServer.
+            properties:
+              cpuCount:
+                description: Server resources
+                type: integer
+              createDate:
+                description: Time information
+                type: string
+              fabricClusterPoolNo:
+                type: string
+              hypervisorType:
+                description: StatusCode represents common status codes from NCloud
+                  API
+                properties:
+                  code:
+                    type: string
+                  codeName:
+                    type: string
+                type: object
+              isProtectServerTermination:
+                type: boolean
+              lastReconcileTime:
+                type: string
+              loginKeyName:
+                description: Security and access information
+                type: string
+              memorySize:
+                format: int64
+                type: integer
+              message:
+                type: string
+              networkInterfaceNoList:
+                items:
+                  type: string
+                type: array
+              observedGeneration:
+                description: Observability fields
+                format: int64
+                type: integer
+              phase:
+                description: Kubernetes reconciliation status
+                type: string
+              placementGroupName:
+                type: string
+              placementGroupNo:
+                description: Placement and GPU information
+                type: string
+              platformType:
+                description: Platform and hypervisor information
+                properties:
+                  code:
+                    type: string
+                  codeName:
+                    type: string
+                type: object
+              privateIp:
+                type: string
+              publicIp:
+                description: Networking information
+                type: string
+              regionCode:
+                description: Region and zone information
+                type: string
+              serverDescription:
+                type: string
+              serverImageName:
+                type: string
+              serverImageProductCode:
+                description: Image and specification information
+                type: string
+              serverInstanceNo:
+                description: Server instance information from NCloud API
+                type: string
+              serverInstanceOperation:
+                description: StatusCode represents common status codes from NCloud
+                  API
+                properties:
+                  code:
+                    type: string
+                  codeName:
+                    type: string
+                type: object
+              serverInstanceStatus:
+                description: Status information
+                properties:
+                  code:
+                    type: string
+                  codeName:
+                    type: string
+                type: object
+              serverInstanceStatusName:
+                type: string
+              serverInstanceType:
+                description: StatusCode represents common status codes from NCloud
+                  API
+                properties:
+                  code:
+                    type: string
+                  codeName:
+                    type: string
+                type: object
+              serverName:
+                type: string
+              serverProductCode:
+                type: string
+              subnetNo:
+                type: string
+              uptime:
+                type: string
+              vpcNo:
+                type: string
+              zoneCode:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

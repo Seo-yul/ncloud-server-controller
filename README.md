@@ -402,62 +402,119 @@ make version-major
 
 ### 릴리스 프로세스
 
-1. **코드 변경 및 테스트**
-   ```bash
-   # 코드 수정
-   vim internal/controller/ncloudserver_controller.go
-   
-   # 로컬 테스트
-   make validate-local
-   ```
+#### 1. 자동 릴리즈 (권장)
 
-2. **커밋 및 푸시**
-   ```bash
-   git add .
-   git commit -m "fix: resolve server creation timeout issue"
-   git push origin develop
-   ```
+```bash
+# 패치 릴리즈 (버그 수정)
+make version-patch
 
-3. **릴리스 생성**
-   ```bash
-   # 패치 릴리스
-   make version-patch
-   # → 자동으로 Git 태그 생성 및 푸시
-   # → GitHub Actions 자동 실행
-   # → 멀티아키텍처 이미지 빌드
-   # → GHCR에 이미지 배포
-   # → GitHub 릴리스 생성
-   ```
+# 마이너 릴리즈 (새 기능)
+make version-minor
 
-### 자동 배포
+# 메이저 릴리즈 (호환성 변경)
+make version-major
+```
 
-GitHub Actions가 다음을 자동으로 처리합니다:
+이 명령어들은 다음 작업을 자동으로 수행합니다:
+- 버전 번호 업데이트 (`Makefile`, `helm/Chart.yaml`)
+- Git 태그 생성 및 푸시
+- GitHub 릴리즈 생성
+- Helm 차트 패키징 및 업로드
 
-- **멀티아키텍처 이미지 빌드**: `linux/amd64`, `linux/arm64`
-- **GHCR 이미지 배포**: GitHub Container Registry
-- **Helm 차트 패키징**: 자동 버전 업데이트
-- **GitHub 릴리스 생성**: 릴리스 노트 및 자산 업로드
-- **매니페스트 업데이트**: Kubernetes 매니페스트 버전 동기화
+#### 2. 수동 릴리즈
+
+```bash
+# 릴리즈 정보 확인
+make release-info
+
+# 사전 조건 체크
+make release-check
+
+# Git 태그 생성
+make release-tag
+
+# Docker 이미지 태깅 (수동)
+make release-image-tag
+
+# GitHub 릴리즈 생성
+make release-github
+
+# Helm 차트 업로드
+make release-upload-assets
+```
+
+#### 3. 전체 릴리즈 프로세스
+
+```bash
+# 완전한 릴리즈 프로세스
+make release
+
+# 빠른 릴리즈 (Git 태그 제외)
+make release-quick
+```
+
+### 릴리즈 후 작업
+
+릴리즈가 완료되면 다음 작업을 수행해야 합니다:
+
+```bash
+# 1. Docker 이미지 태깅 및 푸시
+docker pull ghcr.io/seo-yul/ncloud-server-controller:develop
+docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:latest
+docker push ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+docker push ghcr.io/seo-yul/ncloud-server-controller:latest
+
+# 2. 릴리즈 테스트
+helm install test-release oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
+```
 
 ## 🚀 배포
 
-### GitHub Actions를 통한 자동 배포
+### Makefile 기반 릴리즈
+
+이제 릴리즈는 GitHub Actions 대신 Makefile을 통해 관리됩니다:
 
 ```bash
-# 새 버전 태그 생성
-make version-patch
-# 또는
-git tag v1.0.1
-git push origin v1.0.1
+# 완전한 릴리즈 프로세스
+make release
 
-# GitHub Actions가 자동으로:
-# 1. 멀티 아키텍처 이미지 빌드
-# 2. GHCR에 이미지 푸시
-# 3. GitHub Release 생성
-# 4. 매니페스트 업데이트
+# 빠른 릴리즈 (Git 태그 제외)
+make release-quick
+
+# 개별 단계별 릴리즈
+make release-info      # 릴리즈 정보 확인
+make release-check     # 사전 조건 체크
+make release-tag       # Git 태그 생성
+make release-github    # GitHub 릴리즈 생성
+make release-upload-assets  # Helm 차트 업로드
 ```
 
+### GitHub Actions 빌드
+
+GitHub Actions는 빌드와 테스트만 담당합니다:
+
+- **Build and Deploy**: 코드 빌드 및 단위 테스트
+- **E2E Tests**: End-to-End 테스트
+- **Security Scan**: 보안 스캔
+- **Helm Chart**: Helm 차트 린팅 및 템플릿 검증
+
 ### 수동 배포
+
+릴리즈 후 Docker 이미지를 수동으로 태깅하고 푸시해야 합니다:
+
+```bash
+# 1. 기존 이미지 가져오기
+docker pull ghcr.io/seo-yul/ncloud-server-controller:develop
+
+# 2. 릴리즈 태그 생성
+docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:latest
+
+# 3. 이미지 푸시
+docker push ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+docker push ghcr.io/seo-yul/ncloud-server-controller:latest
+```
 
 ```bash
 # 1. 이미지 빌드 및 푸시
