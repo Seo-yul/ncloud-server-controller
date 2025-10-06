@@ -67,6 +67,10 @@ make test-e2e         # E2E 테스트만
 make test-race        # Race condition 테스트
 make test-benchmark   # 벤치마크 테스트
 make test-coverage-full # 전체 커버리지 리포트
+
+# 멀티 아키텍처 빌드 테스트
+make podman-multiarch-build  # 로컬에서 AMD64/ARM64 빌드
+make docker-buildx          # Docker로 멀티 아키텍처 빌드
 ```
 
 ### 3. 버전 관리
@@ -76,15 +80,17 @@ make test-coverage-full # 전체 커버리지 리포트
 make version-info      # 현재 버전 정보
 make version-check     # 버전 일관성 체크
 
-# 릴리스 생성
-make version-patch     # 패치 릴리스 (버그 수정)
-make version-minor     # 마이너 릴리스 (새 기능)
-make version-major     # 메이저 릴리스 (호환성 변경)
+# 릴리스 생성 (자동화된 프로세스)
+make release           # 완전한 릴리스 프로세스
+make release-quick     # 빠른 릴리스 (Git 태그 제외)
 
-# 또는 직접 스크립트 사용
-./scripts/version.sh patch   # 1.0.0 -> 1.0.1
-./scripts/version.sh minor   # 1.0.0 -> 1.1.0
-./scripts/version.sh major   # 1.0.0 -> 2.0.0
+# 개별 릴리스 단계
+make release-info      # 릴리스 정보 확인
+make release-check     # 사전 조건 체크
+make release-tag       # Git 태그 생성
+make release-image-tag-auto  # 이미지 자동 태깅 및 푸시
+make release-github    # GitHub 릴리스 생성
+make release-upload-assets   # Helm 차트 업로드
 ```
 
 ### 4. Operator 설치
@@ -179,9 +185,14 @@ kubectl logs -f deployment/ncloud-server-controller-manager -n ncloud-system
 ### Helm 설치 (권장)
 
 ```bash
-# Helm 차트 추가
-helm repo add ncloud-controller https://charts.ncloud.devops.ai.kr
-helm install ncloud-controller ncloud-controller/ncloud-server-controller
+# OCI 레지스트리에서 직접 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller
+
+# 특정 버전 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
+
+# Helm 차트 다운로드 및 검사
+helm pull oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
 ```
 
 ### 수동 설치
@@ -205,6 +216,12 @@ podman pull ghcr.io/seo-yul/ncloud-server-controller:latest
 
 # 또는 특정 버전
 podman pull ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+
+# 개발 버전
+podman pull ghcr.io/seo-yul/ncloud-server-controller:develop
+
+# 멀티 아키텍처 지원 (AMD64/ARM64)
+podman manifest inspect ghcr.io/seo-yul/ncloud-server-controller:latest
 ```
 
 ## 💡 사용법
@@ -354,11 +371,13 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 make build
 # 1. 코드 수정
 vim internal/controller/ncloudserver_controller.go
 
-# 2. 빠른 테스트
-make dev-test
+# 2. 빠른 테스트 (개발 중)
+make dev-test           # 30초 이내 빠른 피드백
+make test-quick         # 단위 테스트만 빠르게
 
-# 3. 완전한 검증
-make validate-local
+# 3. 완전한 검증 (커밋 전)
+make validate-local     # 모든 로컬 체크
+make test-all          # 모든 테스트 실행
 
 # 4. 커밋 (자동으로 pre-commit hook 실행)
 git add .
@@ -366,6 +385,9 @@ git commit -m "feat: add new feature"
 
 # 5. 로컬 테스트
 make run-local
+
+# 6. 푸시 후 GitHub Actions 자동 빌드
+git push origin develop
 ```
 
 ## 🔄 버전 관리
@@ -387,44 +409,37 @@ make version-info
 # 버전 일관성 체크
 make version-check
 
-# 패치 릴리스 (버그 수정)
-make version-patch
-# 예: 1.0.0 -> 1.0.1
+# VERSION 변수로 버전 설정
+make release VERSION=1.0.1
+make release-quick VERSION=1.0.1
 
-# 마이너 릴리스 (새 기능)
-make version-minor
-# 예: 1.0.0 -> 1.1.0
-
-# 메이저 릴리스 (호환성 변경)
-make version-major
-# 예: 1.0.0 -> 2.0.0
+# Helm 차트 버전과 이미지 버전을 다르게 설정
+make release VERSION=1.0.1 HELM_CHART_VERSION=1.1.0
 ```
 
 ### 릴리스 프로세스
 
-#### 1. 자동 릴리즈 (권장)
+#### 1. 완전한 릴리스 프로세스 (권장)
 
 ```bash
-# 패치 릴리즈 (버그 수정)
-make version-patch
+# 완전한 릴리스 프로세스 (모든 단계 포함)
+make release
 
-# 마이너 릴리즈 (새 기능)
-make version-minor
-
-# 메이저 릴리즈 (호환성 변경)
-make version-major
+# 빠른 릴리스 (Git 태그 생성 제외)
+make release-quick
 ```
 
 이 명령어들은 다음 작업을 자동으로 수행합니다:
-- 버전 번호 업데이트 (`Makefile`, `helm/Chart.yaml`)
-- Git 태그 생성 및 푸시
-- GitHub 릴리즈 생성
+- 릴리스 정보 확인 및 사전 조건 체크
+- Git 태그 생성 및 푸시 (`make release`만)
+- 기존 이미지 자동 태깅 및 푸시 (`ghcr.io/seo-yul/ncloud-server-controller:develop` → `:v$(VERSION)`, `:latest`)
+- GitHub 릴리스 생성
 - Helm 차트 패키징 및 업로드
 
-#### 2. 수동 릴리즈
+#### 2. 개별 릴리스 단계
 
 ```bash
-# 릴리즈 정보 확인
+# 릴리스 정보 확인
 make release-info
 
 # 사전 조건 체크
@@ -433,96 +448,97 @@ make release-check
 # Git 태그 생성
 make release-tag
 
-# Docker 이미지 태깅 (수동)
-make release-image-tag
+# 이미지 자동 태깅 및 푸시
+make release-image-tag-auto
 
-# GitHub 릴리즈 생성
+# GitHub 릴리스 생성
 make release-github
 
 # Helm 차트 업로드
 make release-upload-assets
 ```
 
-#### 3. 전체 릴리즈 프로세스
+#### 3. 로컬 멀티 아키텍처 빌드
 
 ```bash
-# 완전한 릴리즈 프로세스
-make release
+# Podman으로 AMD64/ARM64 이미지 빌드 및 푸시
+make podman-multiarch-build
 
-# 빠른 릴리즈 (Git 태그 제외)
-make release-quick
+# Docker로 AMD64/ARM64 이미지 빌드 및 푸시
+make docker-buildx
 ```
 
-### 릴리즈 후 작업
+### 릴리스 후 확인
 
-릴리즈가 완료되면 다음 작업을 수행해야 합니다:
+릴리스가 완료되면 다음을 확인하세요:
 
 ```bash
-# 1. Docker 이미지 태깅 및 푸시
-docker pull ghcr.io/seo-yul/ncloud-server-controller:develop
-docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
-docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:latest
-docker push ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
-docker push ghcr.io/seo-yul/ncloud-server-controller:latest
+# 1. GitHub 릴리스 확인
+gh release view v1.0.0
 
-# 2. 릴리즈 테스트
-helm install test-release oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
+# 2. 이미지 태그 확인
+podman pull ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+podman pull ghcr.io/seo-yul/ncloud-server-controller:latest
+
+# 3. Helm 차트 확인
+helm pull oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
 ```
 
 ## 🚀 배포
 
-### Makefile 기반 릴리즈
+### 자동화된 릴리스 프로세스
 
-이제 릴리즈는 GitHub Actions 대신 Makefile을 통해 관리됩니다:
+현재 프로젝트는 완전히 자동화된 릴리스 프로세스를 제공합니다:
 
 ```bash
-# 완전한 릴리즈 프로세스
+# 완전한 릴리스 프로세스 (권장)
 make release
 
-# 빠른 릴리즈 (Git 태그 제외)
+# 빠른 릴리스 (Git 태그 생성 제외)
 make release-quick
 
-# 개별 단계별 릴리즈
-make release-info      # 릴리즈 정보 확인
+# 개별 단계별 릴리스
+make release-info      # 릴리스 정보 확인
 make release-check     # 사전 조건 체크
 make release-tag       # Git 태그 생성
-make release-github    # GitHub 릴리즈 생성
+make release-image-tag-auto  # 이미지 자동 태깅 및 푸시
+make release-github    # GitHub 릴리스 생성
 make release-upload-assets  # Helm 차트 업로드
 ```
 
-### GitHub Actions 빌드
+### GitHub Actions 워크플로우
 
-GitHub Actions는 빌드와 테스트만 담당합니다:
+GitHub Actions는 다음과 같은 워크플로우를 제공합니다:
 
-- **Build and Deploy**: 코드 빌드 및 단위 테스트
-- **E2E Tests**: End-to-End 테스트
-- **Security Scan**: 보안 스캔
-- **Helm Chart**: Helm 차트 린팅 및 템플릿 검증
+- **Build and Deploy** (`build.yml`): 
+  - `main`/`develop` 브랜치 푸시 시 자동으로 AMD64/ARM64 이미지 빌드
+  - 멀티 아키텍처 매니페스트 자동 생성
+  - 이미지 태그: `:main`, `:develop`, `:main-amd64`, `:main-arm64` 등
+- **E2E Tests** (`test-e2e.yml`): End-to-End 테스트
+- **Security Scan** (`security-scan.yml`): 보안 스캔
+- **Helm Chart** (`helm.yml`): Helm 차트 린팅 및 OCI 레지스트리 푸시
 
-### 수동 배포
+### 로컬 멀티 아키텍처 빌드
 
-릴리즈 후 Docker 이미지를 수동으로 태깅하고 푸시해야 합니다:
-
-```bash
-# 1. 기존 이미지 가져오기
-docker pull ghcr.io/seo-yul/ncloud-server-controller:develop
-
-# 2. 릴리즈 태그 생성
-docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
-docker tag ghcr.io/seo-yul/ncloud-server-controller:develop ghcr.io/seo-yul/ncloud-server-controller:latest
-
-# 3. 이미지 푸시
-docker push ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
-docker push ghcr.io/seo-yul/ncloud-server-controller:latest
-```
+로컬에서 직접 멀티 아키텍처 이미지를 빌드할 수 있습니다:
 
 ```bash
-# 1. 이미지 빌드 및 푸시
+# Podman 사용 (권장)
+make podman-multiarch-build
+
+# Docker Buildx 사용
+make docker-buildx
+
+# 단일 아키텍처 빌드
 make docker-build docker-push IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.1
-
-# 2. 매니페스트 업데이트
-make deploy IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.1
 ```
+
+### 이미지 태그 전략
+
+- **개발 브랜치**: `ghcr.io/seo-yul/ncloud-server-controller:develop`
+- **릴리스 태그**: `ghcr.io/seo-yul/ncloud-server-controller:v1.0.0`
+- **최신 태그**: `ghcr.io/seo-yul/ncloud-server-controller:latest`
+- **아키텍처별**: `ghcr.io/seo-yul/ncloud-server-controller:develop-amd64`
 
 ### 프로덕션 배포
 

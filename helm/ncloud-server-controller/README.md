@@ -13,11 +13,15 @@
 ### 기본 설치
 
 ```bash
-# Helm 저장소 추가 (로컬 차트인 경우)
-helm install ncloud-server-controller ./helm/ncloud-server-controller
+# OCI 레지스트리에서 직접 설치 (권장)
+helm install ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller
 
-# 또는 GitHub에서 직접 설치
-helm install ncloud-server-controller https://github.com/Seo-yul/ncloud-server-controller/releases/download/v1.0.0/ncloud-server-controller-1.0.0.tgz
+# 특정 버전 설치
+helm install ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
+
+# 네임스페이스 지정하여 설치
+helm install ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller \
+  --namespace ncloud-system --create-namespace
 ```
 
 ### 사용자 정의 값으로 설치
@@ -47,7 +51,7 @@ metrics:
 EOF
 
 # 사용자 정의 값으로 설치
-helm install ncloud-server-controller ./helm/ncloud-server-controller -f my-values.yaml
+helm install ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller -f my-values.yaml
 ```
 
 ## 설정
@@ -57,7 +61,7 @@ helm install ncloud-server-controller ./helm/ncloud-server-controller -f my-valu
 | 매개변수 | 설명 | 기본값 |
 |---------|------|--------|
 | `operator.image.repository` | 컨테이너 이미지 저장소 | `ghcr.io/seo-yul/ncloud-server-controller` |
-| `operator.image.tag` | 컨테이너 이미지 태그 | `latest` |
+| `operator.image.tag` | 컨테이너 이미지 태그 | `$(VERSION)` (현재 1.0.0) |
 | `operator.replicaCount` | Operator 복제본 수 | `1` |
 | `operator.resources.limits.cpu` | CPU 제한 | `500m` |
 | `operator.resources.limits.memory` | 메모리 제한 | `128Mi` |
@@ -148,10 +152,13 @@ kubectl logs -n ncloud-system -l app.kubernetes.io/name=ncloud-server-controller
 
 ```bash
 # 차트 업그레이드
-helm upgrade ncloud-server-controller ./helm/ncloud-server-controller
+helm upgrade ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller
 
 # 특정 버전으로 업그레이드
-helm upgrade ncloud-server-controller ./helm/ncloud-server-controller --set operator.image.tag=v1.1.0
+helm upgrade ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.1.0
+
+# 이미지 태그만 변경하여 업그레이드
+helm upgrade ncloud-server-controller oci://ghcr.io/seo-yul/ncloud-server-controller --set operator.image.tag=v1.1.0
 ```
 
 ## 제거
@@ -210,14 +217,53 @@ helm lint ./helm/ncloud-server-controller
 helm test ncloud-server-controller
 ```
 
+### Helm 차트 생성 및 배포
+
+#### 로컬에서 Helm 차트 생성 및 업로드
+
+```bash
+# 1단계: 기본 빌드
+make manifests && make generate && make build
+
+# 2단계: 이미지 빌드 (Podman 사용)
+make podman-multiarch-build
+
+# 3단계: Helm 차트 생성 및 푸시
+make helm-generate && make helm-package && make helm-lint && make helm-push
+```
+
+#### 한 번에 모든 작업 수행
+
+```bash
+# 완전한 Helm 차트 생성 및 업로드 (권장)
+make helm-all-with-push
+
+# 또는 단계별 실행
+make helm-all  # 생성 + 패키징 + 린팅 (업로드 제외)
+make helm-push # OCI 레지스트리에 업로드
+```
+
+#### Helm 차트 테스트
+
+```bash
+# Helm 차트 설치 테스트 (Dry Run)
+make helm-dry-run
+
+# 로컬에서 Helm 차트 린팅
+make helm-lint
+
+# Helm 차트 템플릿 렌더링 테스트
+helm template ncloud-controller helm/ncloud-server-controller/
+```
+
 ### 차트 패키징
 
 ```bash
 # 차트 패키지 생성
 helm package ./helm/ncloud-server-controller
 
-# 차트 인덱스 생성
-helm repo index .
+# OCI 레지스트리에 업로드
+helm push ncloud-server-controller-1.0.0.tgz oci://ghcr.io/seo-yul
 ```
 
 ## 기여

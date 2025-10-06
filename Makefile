@@ -33,7 +33,7 @@ IMAGE_TAG_BASE ?= ghcr.io/seo-yul/ncloud-server-controller
 
 # Helm Chart Configuration
 HELM_CHART_NAME ?= ncloud-server-controller
-HELM_CHART_VERSION ?= $(VERSION)
+HELM_CHART_VERSION ?= 1.0.0
 HELM_REGISTRY ?= ghcr.io/seo-yul
 HELM_CHART_PACKAGE ?= $(HELM_CHART_NAME)-$(HELM_CHART_VERSION).tgz
 
@@ -56,7 +56,7 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.41.1
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/seo-yul/ncloud-server-controller:latest
+IMG ?= ghcr.io/seo-yul/ncloud-server-controller:v$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -328,6 +328,14 @@ podman-multiarch-build: ## Build and push multi-arch image using Podman
 	@echo "🐳 Building multi-architecture image with Podman..."
 	@echo "Image: ${IMG}"
 	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
+	# Remove existing manifest and images if they exist (defensive cleanup)
+	@echo "Cleaning up existing manifest and images (if any)..."
+	-podman manifest rm ${IMG} 2>/dev/null || true
+	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
+	@for arch in $(ARCHS); do \
+		echo "Removing existing image for platform: $$arch"; \
+		podman rmi ${IMG}-$${arch##*/} 2>/dev/null || true; \
+	done
 	# Create manifest list
 	podman manifest create ${IMG}
 	# Build and push for each architecture
@@ -346,13 +354,20 @@ podman-multiarch-build: ## Build and push multi-arch image using Podman
 	@echo "Multi-architecture build complete: ${IMG}"
 
 .PHONY: podman-cleanup
-podman-cleanup: ## Clean up temporary podman images and manifests
-	@echo "Cleaning up podman multi-arch artifacts..."
+podman-cleanup: ## Clean up existing multi-arch images and manifests
+	@echo "🧹 Cleaning up existing multi-arch images and manifests..."
+	@echo "Image: ${IMG}"
+	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
+	# Remove existing manifest if it exists
+	-podman manifest rm ${IMG} 2>/dev/null || true
+	# Remove existing platform-specific images
 	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
 	@for arch in $(ARCHS); do \
+		echo "Removing image for platform: $$arch"; \
 		podman rmi ${IMG}-$${arch##*/} 2>/dev/null || true; \
 	done
-	podman manifest rm ${IMG} 2>/dev/null || true
+	@echo "Cleanup complete!"
+
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -369,8 +384,8 @@ helm-template: ## Template Helm chart
 .PHONY: release-info
 release-info: ## Show release information
 	@echo "📋 Release Information:"
-	@echo "  Version: $(VERSION)"
-	@echo "  Image: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  Version: v$(VERSION)"
+	@echo "  Image: $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "  Helm Chart: $(HELM_CHART_PACKAGE)"
 	@echo "  Registry: $(HELM_REGISTRY)"
 
@@ -408,14 +423,31 @@ release-image-tag: ## Tag existing image with release version
 	@echo "🐳 Tagging existing image with release version..."
 	@echo "Using container tool: $(CONTAINER_TOOL)"
 	@echo "Source: $(IMAGE_TAG_BASE):develop"
-	@echo "Target: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "Target: $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "Target: $(IMAGE_TAG_BASE):latest"
 	@echo "💡 Manual tagging commands:"
 	@echo "  $(CONTAINER_TOOL) pull $(IMAGE_TAG_BASE):develop"
-	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):latest"
-	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
+
+.PHONY: release-image-tag-auto
+release-image-tag-auto: ## Automatically tag and push release images
+	@echo "🐳 Automatically tagging and pushing release images..."
+	@echo "Using container tool: $(CONTAINER_TOOL)"
+	@echo "Source: $(IMAGE_TAG_BASE):develop"
+	@echo "Target: $(IMAGE_TAG_BASE):v$(VERSION)"
+	@echo "Target: $(IMAGE_TAG_BASE):latest"
+	@echo "📥 Pulling source image..."
+	$(CONTAINER_TOOL) pull $(IMAGE_TAG_BASE):develop
+	@echo "🏷️ Tagging images..."
+	$(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):v$(VERSION)
+	$(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):latest
+	@echo "📤 Pushing tagged images..."
+	$(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):v$(VERSION)
+	$(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest
+	@echo "✅ Release images tagged and pushed successfully"
 
 .PHONY: release-github
 release-github: release-check ## Create GitHub release
@@ -438,14 +470,14 @@ release-github: release-check ## Create GitHub release
 	## 📦 Installation
 	\`\`\`bash
 	# Using Helm
-	helm install ncloud-server-controller oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version $(VERSION)
+	helm install ncloud-server-controller oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version v$(VERSION)
 	
 	# Using kubectl
 	kubectl apply -k https://github.com/seo-yul/ncloud-server-controller/config/default?ref=v$(VERSION)
 	\`\`\`
 	
 	## 🐳 Docker Images
-	- \`$(IMAGE_TAG_BASE):$(VERSION)\`
+	- \`$(IMAGE_TAG_BASE):v$(VERSION)\`
 - \`$(IMAGE_TAG_BASE):latest\`" \
 		--latest
 	@echo "✅ GitHub release created successfully"
@@ -476,20 +508,20 @@ release-upload-assets: release-helm ## Upload Helm chart to GitHub release
 	@echo "✅ Helm chart uploaded to release v$(VERSION)"
 
 .PHONY: release
-release: release-info release-check release-tag release-image-tag release-github release-upload-assets ## Complete release process
+release: release-info release-check release-tag release-image-tag-auto release-github release-upload-assets ## Complete release process
 	@echo "🎉 Release v$(VERSION) completed successfully!"
 	@echo ""
 	@echo "📋 Release Summary:"
-	@echo "  Version: $(VERSION)"
+	@echo "  Version: v$(VERSION)"
 	@echo "  Git Tag: v$(VERSION)"
-	@echo "  Image: $(IMAGE_TAG_BASE):$(VERSION)"
+	@echo "  Image: $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "  Helm Chart: $(HELM_CHART_PACKAGE)"
 	@echo "  GitHub Release: https://github.com/seo-yul/ncloud-server-controller/releases/tag/v$(VERSION)"
 	@echo ""
 	@echo "💡 Next Steps:"
 	@echo "  1. Tag the Docker image: make release-image-tag"
-	@echo "  2. Push Docker images: $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):$(VERSION) && $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
-	@echo "  3. Test the release: helm install test-release oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version $(VERSION)"
+	@echo "  2. Push Docker images: $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):v$(VERSION) && $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
+	@echo "  3. Test the release: helm install test-release oci://$(HELM_REGISTRY)/$(HELM_CHART_NAME) --version v$(VERSION)"
 
 .PHONY: release-quick
 release-quick: release-check release-github release-upload-assets ## Quick release (skip Git tag creation)
@@ -811,7 +843,7 @@ ci-local: ## Run full CI pipeline locally
 version-info: ## Show current version information
 	@echo "📦 Version Information"
 	@echo "===================="
-	@echo "Current version: $(VERSION)"
+	@echo "Current version: v$(VERSION)"
 	@echo "Image tag base: $(IMAGE_TAG_BASE)"
 	@echo "Current image: $(IMG)"
 	@echo ""
@@ -839,7 +871,7 @@ version-major: ## Create major release (breaking changes)
 .PHONY: version-check
 version-check: ## Check version consistency across files
 	@echo "🔍 Checking version consistency..."
-	@echo "Makefile VERSION: $(VERSION)"
+	@echo "Makefile VERSION: v$(VERSION)"
 	@echo "Helm Chart version: $$(grep '^version:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
 	@echo "Helm Chart appVersion: $$(grep '^appVersion:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
 	@echo "Latest git tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags found')"
@@ -850,15 +882,6 @@ docker-build-simple: ## Simple multi-arch build using Docker Buildx
 	@echo "Image: ${IMG}"
 	@echo "Platforms: linux/amd64,linux/arm64"
 	docker buildx build --platform linux/amd64,linux/arm64 --push --tag ${IMG} .
-	@echo "✅ Multi-architecture image built and pushed successfully!"
-
-.PHONY: podman-build-simple
-podman-build-simple: ## Simple multi-arch build using Podman
-	@echo "🐳 Building multi-architecture image with Podman..."
-	@echo "Image: ${IMG}"
-	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
-	podman build --platform $(PODMAN_MULTI_PLATFORMS) --tag ${IMG} .
-	podman push ${IMG}
 	@echo "✅ Multi-architecture image built and pushed successfully!"
 
 ##@ Container Registry Management
