@@ -35,5 +35,5 @@ go.work
 ehthumbs.db
 Thumbs.db
 
-# 네이버 클라우드 CLI (로컬 설치 파일)
-ncloud_cli_linux/
+# 네이버 클라우드 CLI는 이제 Git에 포함됨 (Docker 빌드에 필요)
+# ncloud_cli_linux/

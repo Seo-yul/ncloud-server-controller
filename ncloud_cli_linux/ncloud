@@ -1,0 +1,4 @@
+#!/bin/bash
+# 절대 경로를 사용하여 상대 경로 문제 해결
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/jre8/bin/java" -jar "$DIR/lib/ncloud-api-cli-1.1.26-SNAPSHOT-jar-with-dependencies.jar" "$@"

@@ -32,7 +32,7 @@ FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 
 # Copy NCloud CLI to a location accessible by non-root user
-COPY --from=builder /workspace/ncloud_cli_linux /app/ncloud-cli/
+COPY --from=builder /workspace/ncloud_cli_linux /app/ncloud_cli_linux
 COPY --from=builder /workspace/manager .
 
 # OCI 이미지 라벨 (GitHub Packages 호환성)

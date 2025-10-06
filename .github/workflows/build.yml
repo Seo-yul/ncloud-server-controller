@@ -161,14 +161,11 @@ jobs:
         echo "AMD64 tag: $AMD64_TAG"
         echo "Platform: linux/amd64"
         
-        # Create Dockerfile.cross for multi-platform build
-        sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-        
         # Create and use buildx builder
         docker buildx create --name ncloud-server-controller-builder --use || true
         
-        # Build and push AMD64 image
-        if ! docker buildx build --push --platform=linux/amd64 --tag ${AMD64_TAG} -f Dockerfile.cross .; then
+        # Build and push AMD64 image (no need for Dockerfile.cross with single platform)
+        if ! docker buildx build --push --platform=linux/amd64 --tag ${AMD64_TAG} .; then
           echo "❌ AMD64 build failed!"
           echo "🔍 Debugging information:"
           echo "Docker version: $(docker --version)"
@@ -180,7 +177,6 @@ jobs:
         
         # Cleanup
         docker buildx rm ncloud-server-controller-builder || true
-        rm -f Dockerfile.cross
         
         echo "✅ AMD64 build completed successfully!"
 
@@ -235,14 +231,11 @@ jobs:
         echo "ARM64 tag: $ARM64_TAG"
         echo "Platform: linux/arm64"
         
-        # Create Dockerfile.cross for multi-platform build
-        sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-        
         # Create and use buildx builder
         docker buildx create --name ncloud-server-controller-builder --use || true
         
-        # Build and push ARM64 image
-        if ! docker buildx build --push --platform=linux/arm64 --tag ${ARM64_TAG} -f Dockerfile.cross .; then
+        # Build and push ARM64 image (no need for Dockerfile.cross with single platform)
+        if ! docker buildx build --push --platform=linux/arm64 --tag ${ARM64_TAG} .; then
           echo "❌ ARM64 build failed!"
           echo "🔍 Debugging information:"
           echo "Docker version: $(docker --version)"
@@ -254,7 +247,6 @@ jobs:
         
         # Cleanup
         docker buildx rm ncloud-server-controller-builder || true
-        rm -f Dockerfile.cross
         
         echo "✅ ARM64 build completed successfully!"
 

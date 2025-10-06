@@ -50,7 +50,7 @@ const (
 	// NCLOUD_CLI_PATH 환경변수명
 	envNCloudCliPath = "NCLOUD_CLI_PATH"
 	// 기본 CLI 경로
-	defaultCliPath = "/app/ncloud-cli/ncloud_cli_linux/ncloud"
+	defaultCliPath = "/app/ncloud_cli_linux/ncloud"
 
 	// 서버 상태 상수
 	serverPhaseCreating    = "Creating"
