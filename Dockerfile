@@ -16,6 +16,9 @@ COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/ internal/
 
+# Copy NCloud CLI
+COPY ncloud_cli_linux/ ncloud_cli_linux/
+
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
@@ -27,8 +30,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
+
+# Copy NCloud CLI to a location accessible by non-root user
+COPY --from=builder /workspace/ncloud_cli_linux /app/ncloud-cli/
 COPY --from=builder /workspace/manager .
-USER 65532:65532
 
 # OCI 이미지 라벨 (GitHub Packages 호환성)
 LABEL org.opencontainers.image.source=https://github.com/Seo-yul/ncloud-server-controller

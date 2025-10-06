@@ -58,6 +58,7 @@ operator:
     readOnlyRootFilesystem: false
     runAsNonRoot: true
     runAsUser: 65532
+    runAsGroup: 65532
   
   # Service account
   serviceAccount:
