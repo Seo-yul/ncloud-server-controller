@@ -17,7 +17,7 @@ env:
   IMAGE_NAME: ghcr.io/seo-yul/ncloud-server-controller
   
   # Tool Versions
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.24"
 
 jobs:
   build:
