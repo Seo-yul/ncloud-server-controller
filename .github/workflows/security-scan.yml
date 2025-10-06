@@ -22,18 +22,19 @@ env:
   HELM_CHART_PACKAGE: ncloud-server-controller-1.0.0.tgz
   
   # Tool Versions
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.24"
   HELM_VERSION: "v3.15.0"
   KUBECTL_VERSION: "v1.31.0"
   KIND_VERSION: "latest"
+  TRIVY_VERSION: "latest"
   
   # Go Configuration
   GOPROXY: https://proxy.golang.org,direct
   GOSUMDB: sum.golang.org
 
 jobs:
-  security:
-    name: Security Scan
+  basic-security:
+    name: Basic Security Scan
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -54,14 +55,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
 
-    - name: Run Vulnerability Check
+    - name: Run Go Vulnerability Check
       run: |
         echo "🔒 Running Go vulnerability check..."
         go install golang.org/x/vuln/cmd/govulncheck@latest
         ~/go/bin/govulncheck ./... > vuln-report.txt 2>&1 || true
         cat vuln-report.txt
 
-    - name: Run Security Scan with Go vet
+    - name: Run Go Security Analysis
       run: |
         echo "🔒 Running Go security analysis with vet..."
         go vet -v ./... > vet-report.txt 2>&1 || true
@@ -75,11 +76,30 @@ jobs:
         path: |
           vuln-report.txt
           vet-report.txt
-        retention-days: 30
+        retention-days: 7
 
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [basic-security]
+    if: always()
+    steps:
     - name: Security Summary
       run: |
         echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tools**: govulncheck, go vet" >> $GITHUB_STEP_SUMMARY
-        echo "- **Status**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
-        echo "- **Reports**: Available as artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Scan Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Basic Security**: ${{ needs.basic-security.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🛠️ Tools Used" >> $GITHUB_STEP_SUMMARY
+        echo "- **Go Vulnerability**: govulncheck" >> $GITHUB_STEP_SUMMARY
+        echo "- **Go Security**: go vet" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Reports" >> $GITHUB_STEP_SUMMARY
+        echo "- Security reports are available as GitHub Actions artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Retention period: 7 days" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 💡 Note" >> $GITHUB_STEP_SUMMARY
+        echo "- This is a lightweight security scan appropriate for a Kubernetes Operator" >> $GITHUB_STEP_SUMMARY
+        echo "- Container security is handled by distroless base image and security contexts" >> $GITHUB_STEP_SUMMARY
+        echo "- Helm security validation is included in the build process" >> $GITHUB_STEP_SUMMARY

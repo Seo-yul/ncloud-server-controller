@@ -161,18 +161,27 @@ jobs:
         echo "AMD64 tag: $AMD64_TAG"
         echo "Platform: linux/amd64"
         
-        # Build AMD64 image using Makefile with architecture-specific tag
-        if ! make docker-buildx PLATFORMS=linux/amd64 IMG="$AMD64_TAG"; then
+        # Create Dockerfile.cross for multi-platform build
+        sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+        
+        # Create and use buildx builder
+        docker buildx create --name ncloud-server-controller-builder --use || true
+        
+        # Build and push AMD64 image
+        if ! docker buildx build --push --platform=linux/amd64 --tag ${AMD64_TAG} -f Dockerfile.cross .; then
           echo "❌ AMD64 build failed!"
           echo "🔍 Debugging information:"
-          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
           echo "Docker version: $(docker --version)"
           echo "Docker buildx version: $(docker buildx version)"
           echo "Available buildx builders:"
           docker buildx ls || echo "Failed to list builders"
-          echo "Makefile docker-buildx target failed with IMG=$AMD64_TAG"
           exit 1
         fi
+        
+        # Cleanup
+        docker buildx rm ncloud-server-controller-builder || true
+        rm -f Dockerfile.cross
+        
         echo "✅ AMD64 build completed successfully!"
 
     - name: AMD64 Build Summary
@@ -226,18 +235,27 @@ jobs:
         echo "ARM64 tag: $ARM64_TAG"
         echo "Platform: linux/arm64"
         
-        # Build ARM64 image using Makefile with architecture-specific tag
-        if ! make docker-buildx PLATFORMS=linux/arm64 IMG="$ARM64_TAG"; then
+        # Create Dockerfile.cross for multi-platform build
+        sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+        
+        # Create and use buildx builder
+        docker buildx create --name ncloud-server-controller-builder --use || true
+        
+        # Build and push ARM64 image
+        if ! docker buildx build --push --platform=linux/arm64 --tag ${ARM64_TAG} -f Dockerfile.cross .; then
           echo "❌ ARM64 build failed!"
           echo "🔍 Debugging information:"
-          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
           echo "Docker version: $(docker --version)"
           echo "Docker buildx version: $(docker buildx version)"
           echo "Available buildx builders:"
           docker buildx ls || echo "Failed to list builders"
-          echo "Makefile docker-buildx target failed with IMG=$ARM64_TAG"
           exit 1
         fi
+        
+        # Cleanup
+        docker buildx rm ncloud-server-controller-builder || true
+        rm -f Dockerfile.cross
+        
         echo "✅ ARM64 build completed successfully!"
 
     - name: ARM64 Build Summary
@@ -284,36 +302,70 @@ jobs:
         
         # Extract the first tag from the multi-line output
         FIRST_TAG=$(echo "${{ steps.meta-manifest.outputs.tags }}" | head -n1)
+        MANIFEST_TAG="${FIRST_TAG}"
+        AMD64_TAG="${FIRST_TAG}-amd64"
+        ARM64_TAG="${FIRST_TAG}-arm64"
         
         echo "Original tags: ${{ steps.meta-manifest.outputs.tags }}"
         echo "First tag: $FIRST_TAG"
+        echo "Manifest tag: $MANIFEST_TAG"
+        echo "AMD64 tag: $AMD64_TAG"
+        echo "ARM64 tag: $ARM64_TAG"
         echo "Base image: ${{ env.IMAGE_NAME }}"
         
-        # Create multi-arch manifest using Makefile
-        if ! make create-multiarch-manifest TAGS="$FIRST_TAG"; then
-          echo "❌ Multi-arch manifest creation failed!"
+        # Remove existing manifest if it exists to avoid conflicts
+        echo "🧹 Cleaning up existing manifest (if any)..."
+        docker manifest rm ${MANIFEST_TAG} 2>/dev/null || echo "No existing manifest to remove"
+        
+        # Create new multi-arch manifest
+        echo "🔨 Creating new multi-architecture manifest..."
+        if ! docker manifest create ${MANIFEST_TAG} ${AMD64_TAG} ${ARM64_TAG}; then
+          echo "❌ Failed to create manifest!"
           echo "🔍 Debugging information:"
-          echo "CONTAINER_TOOL: ${CONTAINER_TOOL:-not set}"
           echo "Docker version: $(docker --version)"
           echo "Docker manifest version: $(docker manifest --version || echo 'manifest command not available')"
-          echo "Available images in registry:"
-          docker images | grep "${{ env.IMAGE_NAME }}" || echo "No local images found"
-          echo "Makefile create-multiarch-manifest target failed with TAGS=$FIRST_TAG"
+          echo "Attempting to inspect source images..."
+          docker manifest inspect ${AMD64_TAG} || echo "AMD64 image not found"
+          docker manifest inspect ${ARM64_TAG} || echo "ARM64 image not found"
           exit 1
         fi
-        echo "✅ Multi-arch manifest created successfully!"
+        
+        # Annotate manifest with platform information
+        echo "🏷️ Annotating manifest with platform information..."
+        docker manifest annotate ${MANIFEST_TAG} ${AMD64_TAG} --os linux --arch amd64
+        docker manifest annotate ${MANIFEST_TAG} ${ARM64_TAG} --os linux --arch arm64
+        
+        # Push the manifest
+        echo "📤 Pushing multi-architecture manifest..."
+        if ! docker manifest push ${MANIFEST_TAG}; then
+          echo "❌ Failed to push manifest!"
+          echo "🔍 Debugging information:"
+          echo "Manifest inspect:"
+          docker manifest inspect ${MANIFEST_TAG} || echo "Failed to inspect manifest"
+          exit 1
+        fi
+        
+        echo "✅ Multi-arch manifest created and pushed successfully!"
 
     - name: Multi-arch Manifest Summary
       run: |
         FIRST_TAG=$(echo "${{ steps.meta-manifest.outputs.tags }}" | head -n1)
+        MANIFEST_TAG="${FIRST_TAG}"
+        AMD64_TAG="${FIRST_TAG}-amd64"
+        ARM64_TAG="${FIRST_TAG}-arm64"
+        
         echo "## 🎉 Multi-arch Manifest Results" >> $GITHUB_STEP_SUMMARY
         echo "- **Registry**: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Image**: ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tags**: $FIRST_TAG" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Strategy**: Parallel Multi-runner Build" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Available Images" >> $GITHUB_STEP_SUMMARY
-        echo "- **Multi-arch**: \`$FIRST_TAG\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **AMD64**: \`${FIRST_TAG}-amd64\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **ARM64**: \`${FIRST_TAG}-arm64\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Multi-arch**: \`$MANIFEST_TAG\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **AMD64**: \`$AMD64_TAG\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **ARM64**: \`$ARM64_TAG\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔧 Build Process" >> $GITHUB_STEP_SUMMARY
+        echo "1. ✅ AMD64 image built and pushed" >> $GITHUB_STEP_SUMMARY
+        echo "2. ✅ ARM64 image built and pushed" >> $GITHUB_STEP_SUMMARY
+        echo "3. ✅ Multi-arch manifest created and pushed" >> $GITHUB_STEP_SUMMARY
