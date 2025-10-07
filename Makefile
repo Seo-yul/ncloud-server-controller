@@ -112,16 +112,20 @@ container-info: ## Show container tool information
 	@echo "  make docker-build-multi   - Build multi-architecture Docker image"
 	@echo "  make podman-build-single  - Build single architecture Podman image"
 	@echo "  make podman-build-multi   - Build multi-architecture Podman image"
+	@echo "  make podman-release-build - Create release manifest (amd64 remote + arm64 local)"
 	@echo ""
 	@echo "Single architecture examples:"
-	@echo "  make docker-build-single PLATFORM=linux/amd64"
-	@echo "  make docker-build-single PLATFORM=linux/arm64"
-	@echo "  make podman-build-single PLATFORM=linux/amd64"
-	@echo "  make podman-build-single PLATFORM=linux/arm64"
+	@echo "  make docker-build-single PLATFORM=linux/amd64  # Creates: $(IMAGE_TAG_BASE):develop-amd64"
+	@echo "  make docker-build-single PLATFORM=linux/arm64  # Creates: $(IMAGE_TAG_BASE):develop-arm64"
+	@echo "  make podman-build-single PLATFORM=linux/amd64  # Creates: $(IMAGE_TAG_BASE):develop-amd64"
+	@echo "  make podman-build-single PLATFORM=linux/arm64  # Creates: $(IMAGE_TAG_BASE):develop-arm64"
 	@echo ""
 	@echo "Multi-architecture examples:"
 	@echo "  make docker-build-multi PLATFORMS=linux/amd64,linux/arm64"
 	@echo "  make podman-build-multi PLATFORMS=linux/amd64,linux/arm64"
+	@echo ""
+	@echo "Release build example:"
+	@echo "  make podman-release-build  # Creates: $(IMG) manifest from remote amd64 + local arm64"
 	@echo ""
 	@echo "Environment detection:"
 	@echo "  - GitHub Actions: Always uses Docker"
@@ -293,7 +297,7 @@ local-check: ## Run all local checks (fmt, vet, lint, test)
 
 # PLATFORM defines the target platform for single architecture builds
 # Examples: linux/amd64, linux/arm64, linux/s390x, linux/ppc64le
-PLATFORM ?= linux/amd64
+PLATFORM ?= linux/arm64
 
 # PLATFORMS defines the target platforms for multi-architecture builds
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -302,60 +306,76 @@ PLATFORMS ?= linux/amd64,linux/arm64
 docker-build-single: ## Build single architecture Docker image (use PLATFORM=linux/arm64 to specify architecture)
 	@echo "🐳 Building single architecture Docker image..."
 	@echo "Platform: $(PLATFORM)"
-	@echo "Image: $(IMG)"
-	docker build --platform $(PLATFORM) -t $(IMG) .
-	@echo "✅ Single architecture build completed: $(IMG)"
+	@if [ "$(PLATFORM)" = "linux/amd64" ]; then \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-amd64"; \
+	elif [ "$(PLATFORM)" = "linux/arm64" ]; then \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-arm64"; \
+	else \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-$${PLATFORM##*/}"; \
+	fi; \
+	echo "Image: $$IMAGE_TAG"; \
+	docker build --platform $(PLATFORM) -t $$IMAGE_TAG .; \
+	echo "✅ Single architecture build completed: $$IMAGE_TAG"
 
 .PHONY: docker-build-multi
 docker-build-multi: ## Build multi-architecture Docker image using Buildx
 	@echo "🐳 Building multi-architecture Docker image..."
 	@echo "Platforms: $(PLATFORMS)"
-	@echo "Image: $(IMG)"
+	@echo "Building architecture-specific images..."
 	# Create and use buildx builder
 	docker buildx create --name ncloud-server-controller-builder --use || true
-	# Build and push multi-arch image
-	docker buildx build --push --platform=$(PLATFORMS) --tag $(IMG) .
+	# Build and push for each architecture separately
+	@for platform in $(shell echo $(PLATFORMS) | tr ',' ' '); do \
+		if [ "$$platform" = "linux/amd64" ]; then \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-amd64"; \
+		elif [ "$$platform" = "linux/arm64" ]; then \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-arm64"; \
+		else \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-$${platform##*/}"; \
+		fi; \
+		echo "Building $$platform -> $$IMAGE_TAG"; \
+		docker buildx build --push --platform=$$platform --tag $$IMAGE_TAG .; \
+	done
 	# Cleanup
 	docker buildx rm ncloud-server-controller-builder || true
-	@echo "✅ Multi-architecture build completed: $(IMG)"
+	@echo "✅ Multi-architecture build completed"
 
 .PHONY: podman-build-single
 podman-build-single: ## Build single architecture Podman image (use PLATFORM=linux/arm64 to specify architecture)
 	@echo "🐳 Building single architecture Podman image..."
 	@echo "Platform: $(PLATFORM)"
-	@echo "Image: $(IMG)"
-	podman build --platform $(PLATFORM) -t $(IMG) .
-	@echo "✅ Single architecture build completed: $(IMG)"
+	@if [ "$(PLATFORM)" = "linux/amd64" ]; then \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-amd64"; \
+	elif [ "$(PLATFORM)" = "linux/arm64" ]; then \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-arm64"; \
+	else \
+		IMAGE_TAG="$(IMAGE_TAG_BASE):develop-$${PLATFORM##*/}"; \
+	fi; \
+	echo "Image: $$IMAGE_TAG"; \
+	podman build --platform $(PLATFORM) -t $$IMAGE_TAG .; \
+	echo "✅ Single architecture build completed: $$IMAGE_TAG"
 
 .PHONY: podman-build-multi
 podman-build-multi: ## Build multi-architecture Podman image
 	@echo "🐳 Building multi-architecture Podman image..."
 	@echo "Platforms: $(PLATFORMS)"
-	@echo "Image: $(IMG)"
-	# Remove existing manifest and images if they exist
-	@echo "Cleaning up existing manifest and images (if any)..."
-	-podman manifest rm $(IMG) 2>/dev/null || true
+	@echo "Building architecture-specific images..."
+	# Build and push for each architecture separately
 	$(eval ARCHS=$(shell echo $(PLATFORMS) | tr ',' ' '))
 	@for arch in $(ARCHS); do \
-		echo "Removing existing image for platform: $$arch"; \
-		podman rmi $(IMG)-$${arch##*/} 2>/dev/null || true; \
-	done
-	# Create manifest list
-	podman manifest create $(IMG)
-	# Build and push for each architecture
-	$(eval ARCHS=$(shell echo $(PLATFORMS) | tr ',' ' '))
-	@for arch in $(ARCHS); do \
-		echo "Building for platform: $$arch"; \
-		podman build --platform $$arch --tag $(IMG)-$${arch##*/} . && \
+		if [ "$$arch" = "linux/amd64" ]; then \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-amd64"; \
+		elif [ "$$arch" = "linux/arm64" ]; then \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-arm64"; \
+		else \
+			IMAGE_TAG="$(IMAGE_TAG_BASE):develop-$${arch##*/}"; \
+		fi; \
+		echo "Building for platform: $$arch -> $$IMAGE_TAG"; \
+		podman build --platform $$arch --tag $$IMAGE_TAG . && \
 		echo "Pushing $$arch image" && \
-		podman push $(IMG)-$${arch##*/} && \
-		echo "Adding $$arch to manifest" && \
-		podman manifest add $(IMG) docker://$(IMG)-$${arch##*/}; \
+		podman push $$IMAGE_TAG; \
 	done
-	# Push manifest list
-	@echo "Pushing multi-architecture manifest"
-	podman manifest push $(IMG) docker://$(IMG)
-	@echo "✅ Multi-architecture build completed: $(IMG)"
+	@echo "✅ Multi-architecture build completed"
 
 .PHONY: docker-push
 docker-push: ## Push Docker image
@@ -364,6 +384,47 @@ docker-push: ## Push Docker image
 .PHONY: podman-push
 podman-push: ## Push Podman image
 	podman push $(IMG)
+
+.PHONY: podman-release-build
+podman-release-build: ## Create release build by combining amd64 (remote) and arm64 (local) images
+	@echo "🚀 Creating release build with multi-architecture manifest..."
+	@echo "Final manifest: $(IMG)"
+	@echo "AMD64 source: $(IMAGE_TAG_BASE):develop-amd64 (remote)"
+	@echo "ARM64 source: $(IMAGE_TAG_BASE):develop-arm64 (local)"
+	
+	# Remove existing manifest if it exists to avoid conflicts
+	@echo "🧹 Cleaning up existing manifest (if any)..."
+	-podman manifest rm $(IMG) 2>/dev/null || true
+	
+	# Pull AMD64 image from remote
+	@echo "📥 Pulling AMD64 image from remote..."
+	podman pull $(IMAGE_TAG_BASE):develop-amd64
+	
+	# Verify ARM64 image exists locally
+	@echo "🔍 Verifying ARM64 image exists locally..."
+	@if ! podman image exists $(IMAGE_TAG_BASE):develop-arm64; then \
+		echo "❌ ARM64 image not found locally: $(IMAGE_TAG_BASE):develop-arm64"; \
+		echo "💡 Please build ARM64 image first: make podman-build-single PLATFORM=linux/arm64"; \
+		exit 1; \
+	fi
+	
+	# Create new manifest
+	@echo "🔨 Creating multi-architecture manifest..."
+	podman manifest create $(IMG)
+	
+	# Add AMD64 image to manifest
+	@echo "➕ Adding AMD64 image to manifest..."
+	podman manifest add $(IMG) docker://$(IMAGE_TAG_BASE):develop-amd64
+	
+	# Add ARM64 image to manifest
+	@echo "➕ Adding ARM64 image to manifest..."
+	podman manifest add $(IMG) docker://$(IMAGE_TAG_BASE):develop-arm64
+	
+	# Push manifest
+	@echo "📤 Pushing multi-architecture manifest..."
+	podman manifest push $(IMG) docker://$(IMG)
+	
+	@echo "✅ Release build completed: $(IMG)"
 
 
 .PHONY: build-installer
@@ -419,13 +480,13 @@ release-tag: release-check ## Create Git tag for release
 release-image-tag: ## Tag existing image with release version
 	@echo "🐳 Tagging existing image with release version..."
 	@echo "Using container tool: $(CONTAINER_TOOL)"
-	@echo "Source: $(IMAGE_TAG_BASE):develop"
+	@echo "Source: $(IMG)"
 	@echo "Target: $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "Target: $(IMAGE_TAG_BASE):latest"
 	@echo "💡 Manual tagging commands:"
-	@echo "  $(CONTAINER_TOOL) pull $(IMAGE_TAG_BASE):develop"
-	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):v$(VERSION)"
-	@echo "  $(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):latest"
+	@echo "  $(CONTAINER_TOOL) pull $(IMG)"
+	@echo "  $(CONTAINER_TOOL) tag $(IMG) $(IMAGE_TAG_BASE):v$(VERSION)"
+	@echo "  $(CONTAINER_TOOL) tag $(IMG) $(IMAGE_TAG_BASE):latest"
 	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "  $(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest"
 
@@ -433,14 +494,14 @@ release-image-tag: ## Tag existing image with release version
 release-image-tag-auto: ## Automatically tag and push release images
 	@echo "🐳 Automatically tagging and pushing release images..."
 	@echo "Using container tool: $(CONTAINER_TOOL)"
-	@echo "Source: $(IMAGE_TAG_BASE):develop"
+	@echo "Source: $(IMG)"
 	@echo "Target: $(IMAGE_TAG_BASE):v$(VERSION)"
 	@echo "Target: $(IMAGE_TAG_BASE):latest"
 	@echo "📥 Pulling source image..."
-	$(CONTAINER_TOOL) pull $(IMAGE_TAG_BASE):develop
+	$(CONTAINER_TOOL) pull $(IMG)
 	@echo "🏷️ Tagging images..."
-	$(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):v$(VERSION)
-	$(CONTAINER_TOOL) tag $(IMAGE_TAG_BASE):develop $(IMAGE_TAG_BASE):latest
+	$(CONTAINER_TOOL) tag $(IMG) $(IMAGE_TAG_BASE):v$(VERSION)
+	$(CONTAINER_TOOL) tag $(IMG) $(IMAGE_TAG_BASE):latest
 	@echo "📤 Pushing tagged images..."
 	$(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):v$(VERSION)
 	$(CONTAINER_TOOL) push $(IMAGE_TAG_BASE):latest
