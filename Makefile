@@ -107,11 +107,21 @@ container-info: ## Show container tool information
 	@echo "Detected tool: $(CONTAINER_TOOL)"
 	@echo "GitHub Actions: $(GITHUB_ACTIONS)"
 	@echo ""
-	@echo "Available commands:"
-	@echo "  make docker-build     - Build single architecture image"
-	@echo "  make docker-buildx    - Build multi-architecture image"
-	@echo "  make podman-multiarch-build - Build multi-arch with Podman"
-	@echo "  make create-multiarch-manifest - Create multi-arch manifest"
+	@echo "Available build commands:"
+	@echo "  make docker-build-single  - Build single architecture Docker image"
+	@echo "  make docker-build-multi   - Build multi-architecture Docker image"
+	@echo "  make podman-build-single  - Build single architecture Podman image"
+	@echo "  make podman-build-multi   - Build multi-architecture Podman image"
+	@echo ""
+	@echo "Single architecture examples:"
+	@echo "  make docker-build-single PLATFORM=linux/amd64"
+	@echo "  make docker-build-single PLATFORM=linux/arm64"
+	@echo "  make podman-build-single PLATFORM=linux/amd64"
+	@echo "  make podman-build-single PLATFORM=linux/arm64"
+	@echo ""
+	@echo "Multi-architecture examples:"
+	@echo "  make docker-build-multi PLATFORMS=linux/amd64,linux/arm64"
+	@echo "  make podman-build-multi PLATFORMS=linux/amd64,linux/arm64"
 	@echo ""
 	@echo "Environment detection:"
 	@echo "  - GitHub Actions: Always uses Docker"
@@ -279,94 +289,81 @@ local-check: ## Run all local checks (fmt, vet, lint, test)
 	@$(MAKE) test
 	@echo "✅ All local checks passed!"
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-.PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+##@ Container Build Commands
 
-.PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	$(CONTAINER_TOOL) push ${IMG}
+# PLATFORM defines the target platform for single architecture builds
+# Examples: linux/amd64, linux/arm64, linux/s390x, linux/ppc64le
+PLATFORM ?= linux/amd64
 
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
-# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-.PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	@echo "🐳 Building multi-architecture image using $(CONTAINER_TOOL)..."
+# PLATFORMS defines the target platforms for multi-architecture builds
+PLATFORMS ?= linux/amd64,linux/arm64
+
+.PHONY: docker-build-single
+docker-build-single: ## Build single architecture Docker image (use PLATFORM=linux/arm64 to specify architecture)
+	@echo "🐳 Building single architecture Docker image..."
+	@echo "Platform: $(PLATFORM)"
+	@echo "Image: $(IMG)"
+	docker build --platform $(PLATFORM) -t $(IMG) .
+	@echo "✅ Single architecture build completed: $(IMG)"
+
+.PHONY: docker-build-multi
+docker-build-multi: ## Build multi-architecture Docker image using Buildx
+	@echo "🐳 Building multi-architecture Docker image..."
 	@echo "Platforms: $(PLATFORMS)"
 	@echo "Image: $(IMG)"
-	@if [ "$(CONTAINER_TOOL)" = "podman" ]; then \
-		echo "Using Podman for multi-arch build..."; \
-		$(MAKE) podman-multiarch-build PLATFORMS="$(PLATFORMS)" IMG="$(IMG)"; \
-	else \
-		echo "Using Docker Buildx for multi-arch build..."; \
-		$(MAKE) docker-buildx-native PLATFORMS="$(PLATFORMS)" IMG="$(IMG)"; \
-	fi
+	# Create and use buildx builder
+	docker buildx create --name ncloud-server-controller-builder --use || true
+	# Build and push multi-arch image
+	docker buildx build --push --platform=$(PLATFORMS) --tag $(IMG) .
+	# Cleanup
+	docker buildx rm ncloud-server-controller-builder || true
+	@echo "✅ Multi-architecture build completed: $(IMG)"
 
-.PHONY: docker-buildx-native
-docker-buildx-native: ## Native Docker Buildx implementation
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name ncloud-server-controller-builder
-	$(CONTAINER_TOOL) buildx use ncloud-server-controller-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm ncloud-server-controller-builder
-	rm Dockerfile.cross
+.PHONY: podman-build-single
+podman-build-single: ## Build single architecture Podman image (use PLATFORM=linux/arm64 to specify architecture)
+	@echo "🐳 Building single architecture Podman image..."
+	@echo "Platform: $(PLATFORM)"
+	@echo "Image: $(IMG)"
+	podman build --platform $(PLATFORM) -t $(IMG) .
+	@echo "✅ Single architecture build completed: $(IMG)"
 
-# PODMAN_MULTI_PLATFORMS defines the target platforms for podman multi-arch builds
-PODMAN_MULTI_PLATFORMS ?= linux/amd64,linux/arm64
-
-.PHONY: podman-multiarch-build
-podman-multiarch-build: ## Build and push multi-arch image using Podman
-	@echo "🐳 Building multi-architecture image with Podman..."
-	@echo "Image: ${IMG}"
-	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
-	# Remove existing manifest and images if they exist (defensive cleanup)
+.PHONY: podman-build-multi
+podman-build-multi: ## Build multi-architecture Podman image
+	@echo "🐳 Building multi-architecture Podman image..."
+	@echo "Platforms: $(PLATFORMS)"
+	@echo "Image: $(IMG)"
+	# Remove existing manifest and images if they exist
 	@echo "Cleaning up existing manifest and images (if any)..."
-	-podman manifest rm ${IMG} 2>/dev/null || true
-	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
+	-podman manifest rm $(IMG) 2>/dev/null || true
+	$(eval ARCHS=$(shell echo $(PLATFORMS) | tr ',' ' '))
 	@for arch in $(ARCHS); do \
 		echo "Removing existing image for platform: $$arch"; \
-		podman rmi ${IMG}-$${arch##*/} 2>/dev/null || true; \
+		podman rmi $(IMG)-$${arch##*/} 2>/dev/null || true; \
 	done
 	# Create manifest list
-	podman manifest create ${IMG}
+	podman manifest create $(IMG)
 	# Build and push for each architecture
-	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
+	$(eval ARCHS=$(shell echo $(PLATFORMS) | tr ',' ' '))
 	@for arch in $(ARCHS); do \
 		echo "Building for platform: $$arch"; \
-		podman build --platform $$arch --tag ${IMG}-$${arch##*/} . && \
+		podman build --platform $$arch --tag $(IMG)-$${arch##*/} . && \
 		echo "Pushing $$arch image" && \
-		podman push ${IMG}-$${arch##*/} && \
+		podman push $(IMG)-$${arch##*/} && \
 		echo "Adding $$arch to manifest" && \
-		podman manifest add ${IMG} docker://${IMG}-$${arch##*/}; \
+		podman manifest add $(IMG) docker://$(IMG)-$${arch##*/}; \
 	done
 	# Push manifest list
 	@echo "Pushing multi-architecture manifest"
-	podman manifest push ${IMG} docker://${IMG}
-	@echo "Multi-architecture build complete: ${IMG}"
+	podman manifest push $(IMG) docker://$(IMG)
+	@echo "✅ Multi-architecture build completed: $(IMG)"
 
-.PHONY: podman-cleanup
-podman-cleanup: ## Clean up existing multi-arch images and manifests
-	@echo "🧹 Cleaning up existing multi-arch images and manifests..."
-	@echo "Image: ${IMG}"
-	@echo "Platforms: $(PODMAN_MULTI_PLATFORMS)"
-	# Remove existing manifest if it exists
-	-podman manifest rm ${IMG} 2>/dev/null || true
-	# Remove existing platform-specific images
-	$(eval ARCHS=$(shell echo $(PODMAN_MULTI_PLATFORMS) | tr ',' ' '))
-	@for arch in $(ARCHS); do \
-		echo "Removing image for platform: $$arch"; \
-		podman rmi ${IMG}-$${arch##*/} 2>/dev/null || true; \
-	done
-	@echo "Cleanup complete!"
+.PHONY: docker-push
+docker-push: ## Push Docker image
+	docker push $(IMG)
+
+.PHONY: podman-push
+podman-push: ## Push Podman image
+	podman push $(IMG)
 
 
 .PHONY: build-installer
@@ -876,13 +873,6 @@ version-check: ## Check version consistency across files
 	@echo "Helm Chart appVersion: $$(grep '^appVersion:' helm/ncloud-server-controller/Chart.yaml | cut -d' ' -f2)"
 	@echo "Latest git tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags found')"
 
-.PHONY: docker-build-simple
-docker-build-simple: ## Simple multi-arch build using Docker Buildx
-	@echo "🐳 Building multi-architecture image with Docker Buildx..."
-	@echo "Image: ${IMG}"
-	@echo "Platforms: linux/amd64,linux/arm64"
-	docker buildx build --platform linux/amd64,linux/arm64 --push --tag ${IMG} .
-	@echo "✅ Multi-architecture image built and pushed successfully!"
 
 ##@ Container Registry Management
 
@@ -910,111 +900,7 @@ cleanup-manifests: ## Clean up existing manifests from GHCR using API
 	@sleep 30
 	@echo "✅ GHCR cleanup completed"
 
-.PHONY: create-multiarch-manifest
-create-multiarch-manifest: ## Create and push multi-arch manifest using appropriate container tool
-	@echo "🐳 Creating multi-architecture manifest using $(CONTAINER_TOOL)..."
-	@if [ -z "$(TAGS)" ]; then \
-		echo "❌ TAGS environment variable is required"; \
-		exit 1; \
-	fi
-	@echo "🏷️  Available tags: $(TAGS)"
-	@echo "🔧 Processing tags..."
-	@if [ "$(CONTAINER_TOOL)" = "podman" ]; then \
-		$(MAKE) create-multiarch-manifest-podman TAGS="$(TAGS)"; \
-	else \
-		$(MAKE) create-multiarch-manifest-docker TAGS="$(TAGS)"; \
-	fi
 
-.PHONY: create-multiarch-manifest-docker
-create-multiarch-manifest-docker: ## Create and push multi-arch manifest using Docker CLI
-	@echo "🐳 Creating multi-architecture manifest using Docker..."
-	@for tag in $(TAGS); do \
-		if [ -n "$$tag" ]; then \
-			echo "🔨 Creating manifest for $$tag"; \
-			tag_name="$${tag##*:}"; \
-			echo "📝 Tag name: $$tag_name"; \
-			base_image="$(shell echo $(IMG) | cut -d: -f1)"; \
-			\
-			# Remove existing manifest if it exists \
-			echo "🧹 Cleaning up existing manifest for $$tag..."; \
-			docker manifest rm "$$tag" 2>/dev/null || true; \
-			\
-			# Also remove architecture-specific manifests that might exist \
-			docker manifest rm "$$base_image:$${tag_name}-amd64" 2>/dev/null || true; \
-			docker manifest rm "$$base_image:$${tag_name}-arm64" 2>/dev/null || true; \
-			\
-			# Wait for cleanup to complete \
-			sleep 5; \
-			\
-			# Create new manifest with architecture-specific tags \
-			echo "🔨 Creating new manifest for $$tag"; \
-			echo "📦 AMD64 image: $$base_image:$${tag_name}-amd64"; \
-			echo "📦 ARM64 image: $$base_image:$${tag_name}-arm64"; \
-			\
-			# Check if architecture-specific images exist and are not manifest lists \
-			echo "🔍 Checking AMD64 image..."; \
-			if docker manifest inspect "$$base_image:$${tag_name}-amd64" >/dev/null 2>&1; then \
-				echo "⚠️  AMD64 image exists as manifest list, skipping manifest creation"; \
-				echo "✅ Multi-arch manifest already exists for $$tag"; \
-			else \
-				docker manifest create "$$tag" \
-					"$$base_image:$${tag_name}-amd64" \
-					"$$base_image:$${tag_name}-arm64"; \
-				\
-				# Annotate AMD64 image \
-				docker manifest annotate "$$tag" \
-					"$$base_image:$${tag_name}-amd64" \
-					--os linux --arch amd64; \
-				\
-				# Annotate ARM64 image \
-				docker manifest annotate "$$tag" \
-					"$$base_image:$${tag_name}-arm64" \
-					--os linux --arch arm64; \
-				\
-				# Push manifest \
-				docker manifest push "$$tag"; \
-				echo "✅ Multi-arch manifest created and pushed for $$tag"; \
-			fi; \
-		fi; \
-	done
-	@echo "🎉 Multi-architecture manifest creation completed!"
-
-.PHONY: create-multiarch-manifest-podman
-create-multiarch-manifest-podman: ## Create and push multi-arch manifest using Podman
-	@echo "🐳 Creating multi-architecture manifest using Podman..."
-	@for tag in $(TAGS); do \
-		if [ -n "$$tag" ]; then \
-			echo "🔨 Creating manifest for $$tag"; \
-			tag_name="$${tag##*:}"; \
-			echo "📝 Tag name: $$tag_name"; \
-			base_image="$(shell echo $(IMG) | cut -d: -f1)"; \
-			\
-			# Remove existing manifest if it exists \
-			echo "🧹 Cleaning up existing manifest for $$tag..."; \
-			podman manifest rm "$$tag" 2>/dev/null || true; \
-			\
-			# Wait for cleanup to complete \
-			sleep 3; \
-			\
-			# Create new manifest with architecture-specific tags \
-			echo "🔨 Creating new manifest for $$tag"; \
-			echo "📦 AMD64 image: $$base_image:$${tag_name}-amd64"; \
-			echo "📦 ARM64 image: $$base_image:$${tag_name}-arm64"; \
-			podman manifest create "$$tag"; \
-			podman manifest add "$$tag" "docker://$$base_image:$${tag_name}-amd64"; \
-			podman manifest add "$$tag" "docker://$$base_image:$${tag_name}-arm64"; \
-			\
-			# Push manifest \
-			podman manifest push "$$tag" "docker://$$tag"; \
-			\
-			echo "✅ Manifest created and pushed for $$tag"; \
-		fi; \
-	done
-	@echo "🎉 Multi-architecture manifest creation completed!"
-
-.PHONY: multiarch-build-and-push
-multiarch-build-and-push: cleanup-manifests create-multiarch-manifest ## Complete multi-arch build pipeline with cleanup
-	@echo "🚀 Multi-architecture build and push pipeline completed!"
 
 ##@ Helm Chart Management
 
