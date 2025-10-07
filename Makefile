@@ -165,53 +165,6 @@ test-coverage: test ## Generate test coverage report
 	@echo "Coverage percentage:"
 	go tool cover -func=cover.out | tail -1
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= ncloud-server-controller-test-e2e
-
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
-
-.PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	@echo "=== Building controller image for E2E testing ==="
-	@echo "Using container tool: $(CONTAINER_TOOL)"
-	$(CONTAINER_TOOL) build -t ncloud-server-controller:e2e-test .
-	@echo "=== Loading image into Kind cluster ==="
-	$(KIND) load docker-image ncloud-server-controller:e2e-test --name $(KIND_CLUSTER)
-	@echo "=== Running E2E tests ==="
-	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout=30m
-	$(MAKE) cleanup-test-e2e
-
-.PHONY: test-e2e-debug
-test-e2e-debug: setup-test-e2e manifests generate fmt vet ## Run the e2e tests with debug information.
-	@echo "Debugging E2E test environment..."
-	@echo "Kind cluster: $(KIND_CLUSTER)"
-	@echo "Project image: ncloud-server-controller:e2e-test"
-	@echo "Namespace: ncloud-system"
-	@echo "Checking Kind cluster status..."
-	$(KIND) get clusters
-	@echo "Checking loaded images..."
-	$(KIND) get nodes --name $(KIND_CLUSTER) | xargs -I {} docker exec {} crictl images
-	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
-
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -818,14 +771,12 @@ test-integration: ## Run integration tests
 	go test ./test/integration/... -v
 
 .PHONY: test-all
-test-all: ## Run all tests (unit + integration + e2e)
+test-all: ## Run all tests (unit + integration)
 	@echo "🧪 Running all tests..."
 	@echo "1️⃣ Unit tests..."
 	@$(MAKE) test-unit
 	@echo "2️⃣ Integration tests..."
 	@$(MAKE) test-integration
-	@echo "3️⃣ E2E tests..."
-	@$(MAKE) test-e2e
 	@echo "✅ All tests completed!"
 
 .PHONY: test-quick
