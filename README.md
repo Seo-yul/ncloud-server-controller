@@ -14,9 +14,8 @@
 - **멀티 아키텍처 지원**: `linux/amd64`, `linux/arm64`
 - **Finalizer 기반 삭제**: 안전한 리소스 정리
 - **실시간 상태 동기화**: 서버 상태를 Kubernetes에 반영
-- **자동 버전 관리**: Semantic Versioning 기반 릴리스
-- **로컬 개발 지원**: Git hooks 및 테스트 파이프라인
-- **GitOps 지원**: Git 기반 인프라 관리
+- **Helm 차트 지원**: OCI 레지스트리를 통한 간편한 설치
+- **로컬 개발 지원**: Makefile 기반 빌드 및 테스트 파이프라인
 
 ## 📋 목차
 
@@ -29,6 +28,7 @@
 - [문서](#문서)
 - [트러블슈팅](#트러블슈팅)
 - [기여하기](#기여하기)
+- [프로젝트 상태](#프로젝트-상태)
 
 ## 🏃‍♂️ 빠른 시작
 
@@ -39,7 +39,7 @@
 git clone https://github.com/Seo-yul/ncloud-server-controller.git
 cd ncloud-server-controller
 
-# 개발 환경 설정 (Git hooks 포함)
+# 개발 환경 설정
 make dev-setup
 
 # 로컬 개발 워크플로우
@@ -49,38 +49,53 @@ make test-all       # 모든 테스트 실행
 make run-local      # 로컬에서 컨트롤러 실행
 ```
 
-### 2. 로컬 테스트 파이프라인
+### 2. 빌드 및 이미지 관리
 
 ```bash
-# 빠른 피드백 (개발 중)
-make dev-test           # 빠른 테스트 (30초 이내)
-make test-quick         # 단위 테스트만 빠르게
+# 컨테이너 도구 정보 확인
+make container-info
 
-# 완전한 검증 (커밋 전)
-make validate-local     # 모든 로컬 체크
-make test-all          # 모든 테스트 실행
+# 단일 아키텍처 빌드
+make docker-build-single PLATFORM=linux/amd64  # AMD64 이미지 빌드
+make docker-build-single PLATFORM=linux/arm64  # ARM64 이미지 빌드
+make podman-build-single PLATFORM=linux/amd64  # Podman으로 AMD64 빌드
 
-# 특수 테스트
-make test-unit         # 단위 테스트만
-make test-integration  # 통합 테스트만
-make test-e2e         # E2E 테스트만
-make test-race        # Race condition 테스트
-make test-benchmark   # 벤치마크 테스트
-make test-coverage-full # 전체 커버리지 리포트
+# 멀티 아키텍처 빌드
+make docker-build-multi PLATFORMS=linux/amd64,linux/arm64
+make podman-build-multi PLATFORMS=linux/amd64,linux/arm64
 
-# 멀티 아키텍처 빌드 테스트
-make podman-multiarch-build  # 로컬에서 AMD64/ARM64 빌드
-make docker-buildx          # Docker로 멀티 아키텍처 빌드
+# 릴리스 빌드 (AMD64 원격 + ARM64 로컬 조합)
+make podman-release-build
+
+# 이미지 푸시
+make docker-push IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
+make podman-push IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.0
 ```
 
-### 3. 버전 관리
+### 3. Helm 차트 관리
+
+```bash
+# Helm 차트 생성 및 패키징
+make helm-generate    # Helm 차트 생성
+make helm-package     # Helm 차트 패키징
+make helm-lint        # Helm 차트 린팅
+
+# Helm 차트 푸시
+make helm-push        # OCI 레지스트리에 푸시
+
+# 모든 Helm 작업
+make helm-all         # 생성, 패키징, 린팅
+make helm-all-with-push  # 생성, 패키징, 린팅, 푸시
+```
+
+### 4. 버전 관리 및 릴리스
 
 ```bash
 # 버전 정보 확인
 make version-info      # 현재 버전 정보
 make version-check     # 버전 일관성 체크
 
-# 릴리스 생성 (자동화된 프로세스)
+# 릴리스 생성
 make release           # 완전한 릴리스 프로세스
 make release-quick     # 빠른 릴리스 (Git 태그 제외)
 
@@ -93,9 +108,41 @@ make release-github    # GitHub 릴리스 생성
 make release-upload-assets   # Helm 차트 업로드
 ```
 
-### 4. Operator 설치
+### 5. Operator 설치
 
-#### 방법 A: GitHub에서 직접 설치 (권장)
+#### 방법 A: Helm으로 설치 (권장)
+
+```bash
+# OCI 레지스트리에서 직접 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller
+
+# 특정 버전 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
+
+# 커스텀 값으로 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller \
+  --set operator.image.tag=v1.0.0 \
+  --set operator.replicaCount=2 \
+  --namespace ncloud-system --create-namespace
+```
+
+#### 방법 B: 로컬 Helm 차트로 설치
+
+```bash
+# 저장소 클론
+git clone https://github.com/Seo-yul/ncloud-server-controller.git
+cd ncloud-server-controller
+
+# Helm 차트 생성 및 설치
+make helm-generate
+make helm-install
+
+# 또는 직접 Helm 설치
+helm install ncloud-controller helm/ncloud-server-controller/ \
+  --namespace ncloud-system --create-namespace
+```
+
+#### 방법 C: kubectl로 직접 설치
 
 ```bash
 # CRD 설치
@@ -105,21 +152,7 @@ kubectl apply -f https://raw.githubusercontent.com/Seo-yul/ncloud-server-control
 kubectl apply -k https://github.com/Seo-yul/ncloud-server-controller/config/default?ref=develop
 ```
 
-#### 방법 B: 로컬에서 설치
-
-```bash
-# 저장소 클론
-git clone https://github.com/Seo-yul/ncloud-server-controller.git
-cd ncloud-server-controller
-
-# CRD 설치
-kubectl apply -f config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml
-
-# Operator 배포
-kubectl apply -k config/default
-```
-
-#### 방법 C: Makefile 사용
+#### 방법 D: Makefile 사용
 
 ```bash
 # 저장소 클론
@@ -131,10 +164,10 @@ make install  # CRD만 설치
 make deploy   # 전체 배포
 ```
 
-### 5. 인증 정보 설정
+### 6. 인증 정보 설정
 
 ```bash
-# 네임스페이스 생성
+# 네임스페이스 생성 (Helm 설치 시 자동 생성됨)
 kubectl create namespace ncloud-system
 
 # NCloud API 키를 Secret으로 생성
@@ -144,7 +177,7 @@ kubectl create secret generic ncloud-credentials \
   --namespace=ncloud-system
 ```
 
-### 6. 서버 생성
+### 7. 서버 생성
 
 ```bash
 # 최소 구성으로 서버 생성
@@ -167,7 +200,7 @@ spec:
 EOF
 ```
 
-### 7. 상태 확인
+### 8. 상태 확인
 
 ```bash
 # 서버 상태 확인
@@ -191,21 +224,41 @@ helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller
 # 특정 버전 설치
 helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
 
+# 커스텀 값으로 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller \
+  --set operator.image.tag=v1.0.0 \
+  --set operator.replicaCount=2 \
+  --set metrics.enabled=true \
+  --namespace ncloud-system --create-namespace
+
 # Helm 차트 다운로드 및 검사
 helm pull oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
 ```
 
-### 수동 설치
+### 로컬 Helm 차트 설치
+
+```bash
+# 저장소 클론
+git clone https://github.com/Seo-yul/ncloud-server-controller.git
+cd ncloud-server-controller
+
+# Helm 차트 생성 및 설치
+make helm-generate
+make helm-install
+
+# 또는 직접 설치
+helm install ncloud-controller helm/ncloud-server-controller/ \
+  --namespace ncloud-system --create-namespace
+```
+
+### kubectl 직접 설치
 
 ```bash
 # 1. CRD 설치
-kubectl apply -f config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml
+kubectl apply -f https://raw.githubusercontent.com/Seo-yul/ncloud-server-controller/develop/config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml
 
-# 2. RBAC 설치
-kubectl apply -f config/rbac/
-
-# 3. Operator 배포
-kubectl apply -f config/default/
+# 2. Operator 배포 (Kustomize 사용)
+kubectl apply -k https://github.com/Seo-yul/ncloud-server-controller/config/default?ref=develop
 ```
 
 ### 컨테이너 이미지
@@ -324,9 +377,13 @@ go version
 brew install kubectl  # macOS
 # 또는 https://kubernetes.io/docs/tasks/tools/ 에서 다운로드
 
-# Operator SDK 설치
-brew install operator-sdk
-operator-sdk version
+# Helm 설치
+brew install helm  # macOS
+# 또는 https://helm.sh/docs/intro/install/ 에서 다운로드
+
+# 컨테이너 도구 (Docker 또는 Podman)
+# Docker: https://docs.docker.com/get-docker/
+# Podman: https://podman.io/getting-started/installation
 ```
 
 ### 프로젝트 클론 및 설정
@@ -336,7 +393,7 @@ operator-sdk version
 git clone https://github.com/Seo-yul/ncloud-server-controller.git
 cd ncloud-server-controller
 
-# 개발 환경 설정 (Git hooks 포함)
+# 개발 환경 설정
 make dev-setup
 
 # 의존성 설치
@@ -379,22 +436,24 @@ make test-quick         # 단위 테스트만 빠르게
 make validate-local     # 모든 로컬 체크
 make test-all          # 모든 테스트 실행
 
-# 4. 커밋 (자동으로 pre-commit hook 실행)
-git add .
-git commit -m "feat: add new feature"
+# 4. 빌드 및 이미지 생성
+make docker-build-single PLATFORM=linux/amd64
+make podman-build-single PLATFORM=linux/arm64
 
-# 5. 로컬 테스트
+# 5. Helm 차트 테스트
+make helm-generate
+make helm-lint
+make helm-dry-run
+
+# 6. 로컬 테스트
 make run-local
-
-# 6. 푸시 후 GitHub Actions 자동 빌드
-git push origin develop
 ```
 
 ## 🔄 버전 관리
 
 ### Semantic Versioning
 
-이 프로젝트는 [Semantic Versioning](https://semver.org/)을 사용합니다:
+이 프로젝트는 [Semantic Versioning](https://semver.org/)을 사용합니다.
 
 - **MAJOR**: 호환성을 깨뜨리는 변경사항
 - **MINOR**: 하위 호환성을 유지하면서 기능 추가
@@ -429,7 +488,7 @@ make release
 make release-quick
 ```
 
-이 명령어들은 다음 작업을 자동으로 수행합니다:
+이 명령어들은 다음 작업을 자동으로 수행합니다.
 - 릴리스 정보 확인 및 사전 조건 체크
 - Git 태그 생성 및 푸시 (`make release`만)
 - 기존 이미지 자동 태깅 및 푸시 (`ghcr.io/seo-yul/ncloud-server-controller:develop` → `:v$(VERSION)`, `:latest`)
@@ -488,7 +547,7 @@ helm pull oci://ghcr.io/seo-yul/ncloud-server-controller --version 1.0.0
 
 ### 자동화된 릴리스 프로세스
 
-현재 프로젝트는 완전히 자동화된 릴리스 프로세스를 제공합니다:
+현재 프로젝트는 완전히 자동화된 릴리스 프로세스를 제공한다.
 
 ```bash
 # 완전한 릴리스 프로세스 (권장)
@@ -506,31 +565,41 @@ make release-github    # GitHub 릴리스 생성
 make release-upload-assets  # Helm 차트 업로드
 ```
 
-### GitHub Actions 워크플로우
-
-GitHub Actions는 다음과 같은 워크플로우를 제공합니다:
-
-- **Build and Deploy** (`build.yml`): 
-  - `main`/`develop` 브랜치 푸시 시 자동으로 AMD64/ARM64 이미지 빌드
-  - 멀티 아키텍처 매니페스트 자동 생성
-  - 이미지 태그: `:main`, `:develop`, `:main-amd64`, `:main-arm64` 등
-- **E2E Tests** (`test-e2e.yml`): End-to-End 테스트
-- **Security Scan** (`security-scan.yml`): 보안 스캔
-- **Helm Chart** (`helm.yml`): Helm 차트 린팅 및 OCI 레지스트리 푸시
-
 ### 로컬 멀티 아키텍처 빌드
 
-로컬에서 직접 멀티 아키텍처 이미지를 빌드할 수 있습니다:
+로컬에서 직접 멀티 아키텍처 이미지를 빌드할 수 있다.
 
 ```bash
+# 컨테이너 도구 정보 확인
+make container-info
+
 # Podman 사용 (권장)
-make podman-multiarch-build
+make podman-build-multi PLATFORMS=linux/amd64,linux/arm64
 
 # Docker Buildx 사용
-make docker-buildx
+make docker-build-multi PLATFORMS=linux/amd64,linux/arm64
+
+# 릴리스 빌드 (AMD64 원격 + ARM64 로컬 조합)
+make podman-release-build
 
 # 단일 아키텍처 빌드
-make docker-build docker-push IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.1
+make docker-build-single PLATFORM=linux/amd64
+make podman-build-single PLATFORM=linux/arm64
+```
+
+### Helm 차트 배포
+
+```bash
+# Helm 차트 생성 및 패키징
+make helm-generate
+make helm-package
+make helm-lint
+
+# OCI 레지스트리에 푸시
+make helm-push
+
+# 모든 Helm 작업
+make helm-all-with-push
 ```
 
 ### 이미지 태그 전략
@@ -542,17 +611,29 @@ make docker-build docker-push IMG=ghcr.io/seo-yul/ncloud-server-controller:v1.0.
 
 ### 프로덕션 배포
 
+#### Helm으로 배포 (권장)
+
+```bash
+# OCI 레지스트리에서 직접 설치
+helm install ncloud-controller oci://ghcr.io/seo-yul/ncloud-server-controller \
+  --version 1.0.0 \
+  --namespace ncloud-system --create-namespace
+
+# 배포 확인
+kubectl get pods -n ncloud-system
+kubectl logs -f deployment/ncloud-server-controller-manager -n ncloud-system
+```
+
+#### kubectl로 배포
+
 ```bash
 # 1. CRD 설치
-kubectl apply -f config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml
+kubectl apply -f https://raw.githubusercontent.com/Seo-yul/ncloud-server-controller/develop/config/crd/bases/server.ncloud.devops.ai.kr_ncloudservers.yaml
 
-# 2. RBAC 설치
-kubectl apply -f config/rbac/
+# 2. Operator 배포
+kubectl apply -k https://github.com/Seo-yul/ncloud-server-controller/config/default?ref=develop
 
-# 3. Operator 배포
-kubectl apply -f config/default/
-
-# 4. 배포 확인
+# 3. 배포 확인
 kubectl get pods -n ncloud-system
 kubectl logs -f deployment/ncloud-server-controller-manager -n ncloud-system
 ```
@@ -665,25 +746,16 @@ curl -k https://localhost:8443/metrics
 - [x] **Secret 기반 인증**: 안전한 API 키 관리
 - [x] **Finalizer 기반 삭제**: 안전한 리소스 정리
 - [x] **멀티 아키텍처 지원**: `linux/amd64`, `linux/arm64`
-- [x] **GitHub Actions CI/CD**: 자동 빌드 및 배포
+- [x] **Helm 차트**: OCI 레지스트리를 통한 간편한 설치
 - [x] **자동 버전 관리**: Semantic Versioning 기반 릴리스
-- [x] **로컬 개발 지원**: Git hooks 및 테스트 파이프라인
+- [x] **로컬 개발 지원**: Makefile 기반 빌드 및 테스트 파이프라인
 - [x] **문서화**: 완전한 CRD 스펙 정의서
 - [x] **예제 매니페스트**: 다양한 사용 사례
+- [x] **컨테이너 빌드**: Docker/Podman 멀티 아키텍처 빌드 지원
 
 ### 🚧 진행 중인 작업
 
 - [ ] **JSON 응답 파싱 개선**: NCloud CLI 응답 구조 정확한 파싱
-- [ ] **테스트 커버리지 향상**: 현재 22.5% → 목표 80%+
-- [ ] **모니터링 및 메트릭**: Prometheus 메트릭 추가
-- [ ] **웹훅 검증**: 입력 검증 웹훅 구현
-
-### 🔮 향후 계획
-
-- [ ] **Helm 차트**: 설치 및 관리 자동화
-- [ ] **Operator Lifecycle Manager**: OLM 지원
-- [ ] **고급 기능**: 자동 스케일링, 백업 관리
-- [ ] **멀티 리전 지원**: 여러 리전 동시 관리
 
 ---
 
