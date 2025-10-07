@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,10 +54,20 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
+	// Check if the image already exists (built by CI/CD pipeline)
+	By("checking if the manager(Operator) image exists")
+	cmd := exec.Command("docker", "images", "-q", projectImage)
+	output, err := utils.Run(cmd)
+
+	if err != nil || strings.TrimSpace(output) == "" {
+		// Image doesn't exist, build it
+		By("building the manager(Operator) image")
+		cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
+	} else {
+		By("using existing manager(Operator) image")
+	}
 
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
 	// built and available before running the tests. Also, remove the following block.

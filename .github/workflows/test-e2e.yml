@@ -73,17 +73,9 @@ jobs:
         echo "=== Creating Kind cluster for E2E testing ==="
         kind create cluster --name ncloud-server-controller-test-e2e --wait 300s
         
-        # Build the controller image for E2E testing
-        echo "=== Building controller image for E2E testing ==="
-        docker build -t ncloud-server-controller:e2e-test .
-        
-        # Load the image into Kind cluster
-        echo "=== Loading image into Kind cluster ==="
-        kind load docker-image ncloud-server-controller:e2e-test --name ncloud-server-controller-test-e2e
-        
-        # Run E2E tests with additional debugging
+        # Run E2E tests (image building and loading will be handled by the test suite)
         echo "=== Running E2E tests ==="
-        KIND_CLUSTER=ncloud-server-controller-test-e2e go test ./test/e2e/ -v -ginkgo.v -timeout=30m
+        KIND_CLUSTER=ncloud-server-controller-test-e2e CERT_MANAGER_INSTALL_SKIP=true go test ./test/e2e/ -v -ginkgo.v -timeout=30m
         
         # Collect debugging information if tests fail
         if [ $? -ne 0 ]; then
@@ -96,7 +88,7 @@ jobs:
           
           # Check loaded images
           echo "=== Loaded images ==="
-          docker exec kind-ncloud-server-controller-test-e2e-control-plane crictl images | grep ncloud-server-controller || echo "No ncloud-server-controller images found"
+          docker exec kind-ncloud-server-controller-test-e2e-control-plane crictl images || echo "Failed to list images"
           
           # Check all pods
           echo "=== All pods ==="
